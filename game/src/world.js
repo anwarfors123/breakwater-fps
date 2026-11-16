@@ -1,11 +1,8 @@
 // BREAKWATER — a container terminal at dusk, built out of boxes because a box is honest: it
-// collides, it occludes and it reads at a glance. The layout is a competitive three-lane map.
-// Two bomb sites sit north of the middle, one inside a warehouse (A, west) and one among the
-// container stacks (B, east); the attacking side comes from the south gate and the defending
-// side holds the north yard. Every route meets at mid, and mid is where the fight happens.
-//
-// The module owns the geometry, the colliders the simulation sweeps against, the meshes a
-// bullet can hit, the spawn rings, the sites and the navigation grid the bots path on.
+// collides, it occludes and it reads at a glance. Two sites north of mid, one in a warehouse (A)
+// and one in the container stacks (B); attackers come from the south gate, every route meets at
+// mid. This module owns the geometry, the colliders, the shootable meshes, the spawns, the sites
+// and the navigation lattice the bots path on.
 
 import * as THREE from 'three';
 import { PALETTE, rgb } from './palette.js';
@@ -22,12 +19,12 @@ function materials() {
       metalness: name === 'steel' || name === 'rust' ? 0.45 : 0.05,
     });
   return {
-    asphalt: make('canvas', 1.55),
-    concrete: make('concrete', 0.72),
-    wall: make('concrete', 0.52),
-    steel: make('steel', 0.85, 0.5),
-    rust: make('rust', 0.9, 0.55),
-    crate: make('rust', 1.25),
+    asphalt: make('canvas', 1.95),
+    concrete: make('concrete', 1.1),
+    wall: make('concrete', 0.92),
+    steel: make('steel', 1.0, 0.5),
+    rust: make('rust', 1.05, 0.55),
+    crate: make('rust', 1.35),
     surface: make('surface', 1.2),
     hairline: make('hairline', 1.4),
     dock: make('dock', 1.0, 0.7),
@@ -76,7 +73,7 @@ export function createWorld(scene) {
     return mesh;
   }
 
-  // ── Ground ────────────────────────────────────────────────────────────────────────────────
+  // Ground
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), mats.asphalt);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -91,17 +88,19 @@ export function createWorld(scene) {
     group.add(line);
   }
 
-  // ── Perimeter ─────────────────────────────────────────────────────────────────────────────
+  // Perimeter
   const W = 6.5; // perimeter height
   block(0, 0, BOUNDS.minZ - 0.6, 62, W, 1.2, mats.wall);
   block(0, 0, BOUNDS.maxZ + 0.6, 62, W, 1.2, mats.wall);
   block(BOUNDS.minX - 0.6, 0, 0, 1.2, W, 66, mats.wall);
   block(BOUNDS.maxX + 0.6, 0, 0, 1.2, W, 66, mats.wall);
 
-  // ── Warehouse, site A (west) ──────────────────────────────────────────────────────────────
+  // Warehouse, site A (west)
   // Four walls with a wide south doorway and a loading bay on the east face.
   const wx = -17;
-  block(wx, 0, -21, 20, 5.4, 0.9, mats.wall); // north
+  block(wx - 6.5, 0, -21, 7, 5.4, 0.9, mats.wall); // north, west of the back door
+  block(wx + 6.5, 0, -21, 7, 5.4, 0.9, mats.wall); // north, east of the back door
+  block(wx, 3.9, -21, 6, 1.5, 0.9, mats.wall); // header over the back door
   block(wx - 10.4, 0, -11, 0.9, 5.4, 20, mats.wall); // west
   block(wx + 10.4, 0, -11, 0.9, 5.4, 20, mats.wall); // east, with a bay cut below
   // South face, split around a 6 m doorway at the middle.
@@ -119,7 +118,7 @@ export function createWorld(scene) {
   block(wx - 1.5, 0, -18.5, 3.4, 1.6, 1.6, mats.crate);
   block(wx + 2.5, 1.6, -18.5, 1.6, 1.6, 1.6, mats.crate);
 
-  // ── Container yard, site B (east) ────────────────────────────────────────────────────────
+  // Container yard, site B (east)
   const bx = 17;
   const stack = (x, z, along, tiers = 2, mat = mats.steel) => {
     for (let t = 0; t < tiers; t += 1) {
@@ -141,7 +140,7 @@ export function createWorld(scene) {
   block(bx + 3.5, 0, -15.5, 1.4, 1.4, 1.4, mats.crate);
   block(bx - 3.5, 0, -15.5, 1.4, 1.4, 1.4, mats.crate);
 
-  // ── Mid ──────────────────────────────────────────────────────────────────────────────────
+  // Mid
   // A spine wall down the middle with two gaps: the long door and the short door.
   block(-3.5, 0, 2, 9, 2.3, 0.8, mats.concrete);
   block(4.2, 0, 2, 5.6, 2.3, 0.8, mats.concrete);
@@ -154,7 +153,7 @@ export function createWorld(scene) {
   block(-11, 0, -2, 1.4, 1.4, 1.4, mats.crate);
   block(11.5, 0, -1, 1.4, 1.4, 1.4, mats.crate);
 
-  // ── Connectors ───────────────────────────────────────────────────────────────────────────
+  // Connectors
   // West long: the wall that separates the warehouse approach from mid.
   block(-13.5, 0, 8, 0.9, 3.2, 14, mats.concrete);
   block(-23.5, 0, 9, 0.9, 3.2, 10, mats.concrete);
@@ -162,7 +161,7 @@ export function createWorld(scene) {
   block(13.5, 0, 9, 2.5, 2.6, 13, mats.rust);
   block(24.5, 0, 12, 2.5, 2.6, 8, mats.steel);
 
-  // ── Spawn yards ──────────────────────────────────────────────────────────────────────────
+  // Spawn yards
   block(0, 0, 24, 14, 0.06, 10, mats.dock, { solid: false, shootable: false });
   block(0, 0, -26, 14, 0.06, 10, mats.warden, { solid: false, shootable: false });
   // A few crates to break the spawn silhouettes.
@@ -170,7 +169,9 @@ export function createWorld(scene) {
     block(x, 0, z, 1.5, 1.5, 1.5, mats.crate);
   }
 
-  // ── Dock lamps: the light the scene is really lit by, and the map's depth cues ────────────
+  // Dock lamps: the light the scene is really lit by, and the map's depth cues
+  const halos = [];
+  const rings = [];
   const lampPosts = [
     [-9, 0, 14],
     [9, 0, 14],
@@ -186,13 +187,27 @@ export function createWorld(scene) {
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), mats.accent);
     head.position.set(x, 5.35, z);
     group.add(head);
-    const lamp = new THREE.PointLight(new THREE.Color(rgb('accent').r, rgb('accent').g, rgb('accent').b), 14, 22, 2);
+    // A halo, not a bigger bulb: the glow is what reads at a distance, and it costs one sphere.
+    const halo = new THREE.Mesh(
+      new THREE.SphereGeometry(0.68, 12, 10),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(rgb('accent').r, rgb('accent').g, rgb('accent').b),
+        transparent: true,
+        opacity: 0.18,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    halo.position.set(x, 5.35, z);
+    group.add(halo);
+    halos.push(halo);
+    const lamp = new THREE.PointLight(new THREE.Color(rgb('accent').r, rgb('accent').g, rgb('accent').b), 18, 26, 2);
     lamp.position.set(x, 5.2, z);
     group.add(lamp);
     shootables.push(pole);
   }
 
-  // ── Bomb sites: a painted ring and a mast, so both are readable from across the yard ─────
+  // Bomb sites: a painted ring and a mast, so both are readable from across the yard
   const sites = [
     { id: 'A', name: 'Warehouse', x: wx + 0.5, z: -12.5, radius: 5.2 },
     { id: 'B', name: 'Container yard', x: bx, z: -13, radius: 5.0 },
@@ -210,16 +225,51 @@ export function createWorld(scene) {
     ring.rotation.x = -Math.PI / 2;
     ring.position.set(site.x, 0.02, site.z);
     group.add(ring);
+    rings.push(ring);
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.2, 6), mats.accent);
     mast.position.set(site.x, 1.1, site.z);
     group.add(mast);
   }
 
-  // ── Light ────────────────────────────────────────────────────────────────────────────────
-  scene.fog = new THREE.Fog(new THREE.Color(rgb('canvas').r, rgb('canvas').g, rgb('canvas').b), 34, 96);
-  const hemi = new THREE.HemisphereLight(0x5d7186, 0x2a2520, 0.85);
+  // Sky: a dusk gradient dome, so the yard has a horizon instead of a flat fill
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(150, 24, 16),
+    new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      uniforms: {
+        top: { value: new THREE.Color(0x1b2a38) },
+        mid: { value: new THREE.Color(0x46606f) },
+        low: { value: new THREE.Color(0xa9793f) },
+      },
+      vertexShader: `
+        varying float h;
+        void main() {
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          h = normalize(world.xyz).y;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }`,
+      fragmentShader: `
+        uniform vec3 top; uniform vec3 mid; uniform vec3 low;
+        varying float h;
+        void main() {
+          float t = clamp(h * 1.7 + 0.22, 0.0, 1.0);
+          vec3 c = mix(low, mid, smoothstep(0.0, 0.38, t));
+          c = mix(c, top, smoothstep(0.34, 1.0, t));
+          gl_FragColor = vec4(c, 1.0);
+        }`,
+    }),
+  );
+  sky.frustumCulled = false;
+  scene.add(sky);
+
+  // Light
+  // A working yard at dusk, not a night: fog that lifts, a strong low sun and a bright sky bounce.
+  scene.fog = new THREE.Fog(new THREE.Color(rgb('canvas').r, rgb('canvas').g, rgb('canvas').b), 52, 150);
+  const hemi = new THREE.HemisphereLight(0xa8c4d8, 0x5a5145, 1.75);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffd2a0, 1.55);
+  const sun = new THREE.DirectionalLight(0xffe0b8, 2.15);
   sun.position.set(26, 34, 18);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -232,11 +282,15 @@ export function createWorld(scene) {
   sun.shadow.bias = -0.0009;
   sun.shadow.normalBias = 0.03;
   scene.add(sun);
+  // A flat ambient floor: shadowed faces stay readable instead of going black, which is what makes
+  // a dusk map feel like a dusk map instead of a night one.
+  const ambient = new THREE.AmbientLight(0xdfe8f2, 0.55);
+  scene.add(ambient);
   const rim = new THREE.DirectionalLight(0x4a6f8c, 0.5);
   rim.position.set(-24, 16, -26);
   scene.add(rim);
 
-  // ── Spawns ───────────────────────────────────────────────────────────────────────────────
+  // Spawns
   const spawns = {
     dock: [
       { x: -5, z: 27, yaw: Math.PI },
@@ -254,7 +308,7 @@ export function createWorld(scene) {
     ],
   };
 
-  // ── Navigation grid ──────────────────────────────────────────────────────────────────────
+  // Navigation grid
   // A coarse 8-connected lattice, one node every 2.5 m, pruned of every cell a bot could not
   // stand in. Paths are A* over it with a straight-line shortcut pass, which is enough for a
   // map this size and costs nothing to build.
@@ -287,7 +341,24 @@ export function createWorld(scene) {
     return best;
   }
 
-  return { group, colliders, shootables, spawns, sites, nav, bounds: BOUNDS, blockedAt, groundAt, BOT_RADIUS };
+  // Bake the transforms now: the world never moves, and a raycast before the first render would
+  // otherwise see every plane in its unrotated pose.
+  group.updateMatrixWorld(true);
+
+  // The map breathes: the site rings pulse so they read from the far spawn, and the lamp halos
+  // flicker a little so the yard is not lit by a still photograph.
+  let clock = 0;
+  function tick(dt) {
+    clock += dt;
+    for (let i = 0; i < rings.length; i += 1) {
+      rings[i].material.opacity = 0.34 + 0.16 * Math.sin(clock * 1.7 + i * 2.1);
+    }
+    for (let i = 0; i < halos.length; i += 1) {
+      halos[i].material.opacity = 0.16 + 0.05 * Math.sin(clock * 2.6 + i * 1.3);
+    }
+  }
+
+  return { group, colliders, shootables, spawns, sites, nav, bounds: BOUNDS, blockedAt, groundAt, tick, BOT_RADIUS };
 }
 
 /** Build the walkable lattice and its adjacency list. */
@@ -326,6 +397,16 @@ function buildNav(colliders) {
     }
     return best;
   };
+  /** Is the straight line between two nodes actually walkable, or is a wall between them? */
+  const segmentClear = (ax, az, bx, bz) => {
+    const length = Math.hypot(bx - ax, bz - az);
+    const samples = Math.max(2, Math.ceil(length / 0.45));
+    for (let i = 1; i < samples; i += 1) {
+      const t = i / samples;
+      if (!walkable(ax + (bx - ax) * t, az + (bz - az) * t)) return false;
+    }
+    return true;
+  };
   for (const node of nodes) {
     for (let dz = -step; dz <= step; dz += step) {
       for (let dx = -step; dx <= step; dx += step) {
@@ -338,6 +419,7 @@ function buildNav(colliders) {
           const b = index.get(`${Math.round(node.x * 10)}:${Math.round((node.z + dz) * 10)}`);
           if (a === undefined || b === undefined) continue;
         }
+        if (!segmentClear(node.x, node.z, nodes[other].x, nodes[other].z)) continue;
         node.links.push(other);
       }
     }

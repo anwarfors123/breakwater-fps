@@ -1,11 +1,7 @@
-// The arsenal. Four weapons and one armour vest, each with its own ballistics so the choice in
-// the buy menu actually changes how the round plays: the rifle rewards one-tap discipline, the
-// SMG rewards a close rush, the sniper holds a lane, the pistol is what you have when you lose.
-//
-// Accuracy is a function of three things and nothing else: the weapon's base cone, how fast the
-// shooter is moving, and how long the trigger has been held. Recoil climbs and drifts, then
-// decays when the trigger is released, so a burst is always tighter than a spray. Both the
-// player and the bots go through this same code, which is why the bots miss the way they do.
+// The arsenal: four weapons and a vest, each with its own ballistics so the buy menu changes how
+// the round plays. Accuracy is the base cone plus how fast the shooter moves plus how long the
+// trigger has been held; recoil climbs and decays, so a burst is always tighter than a spray.
+// The player and the bots fire through this same code, which is why the bots miss the way they do.
 
 export const WEAPONS = {
   tally: {
@@ -96,6 +92,20 @@ export const WEAPONS = {
 
 export const ARMOUR = { id: 'bastion', name: 'Bastion vest', price: 650, points: 100 };
 
+// One frag a round: a thrown blast is the answer to a held corner, and the only damage in the game
+// that does not need a line of sight at the moment you commit to it.
+export const GRENADE = {
+  id: 'frag',
+  name: 'Frag',
+  price: 300,
+  max: 1,
+  fuse: 2.4,
+  radius: 5.2,
+  damage: 118,
+  throwSpeed: 16.5,
+  throwLift: 3.2,
+};
+
 /** Full ammo for a weapon, as a fresh magazine state. */
 export function freshAmmo(def) {
   return { mag: def.mag, reserve: def.reserve };
@@ -127,14 +137,14 @@ export function createWeapon(def) {
     if (state.reloading > 0) {
       state.reloading -= dt;
       if (state.reloading <= 0) {
-        const need = def.mag - state.mag;
+        const need = state.def.mag - state.mag;
         const taken = Math.min(need, state.reserve);
         state.mag += taken;
         state.reserve -= taken;
       }
     }
     if (state.held <= 0) {
-      const decay = Math.exp(-def.recoilDecay * dt);
+      const decay = Math.exp(-state.def.recoilDecay * dt);
       state.recoilPitch *= decay;
       state.recoilYaw *= decay;
       state.shots = Math.max(0, state.shots - dt * 6);
@@ -144,30 +154,30 @@ export function createWeapon(def) {
   }
 
   function beginReload() {
-    if (state.reloading > 0 || state.mag >= def.mag || state.reserve <= 0) return false;
-    state.reloading = def.reloadTime;
+    if (state.reloading > 0 || state.mag >= state.def.mag || state.reserve <= 0) return false;
+    state.reloading = state.def.reloadTime;
     return true;
   }
 
   /** Cone half-angle for the next shot: base, plus movement, plus the spray the trigger built. */
   function cone(speedRatio) {
-    const spray = Math.min(state.shots, 12) * def.recoilUp * 0.55;
-    return def.spreadBase + speedRatio * def.spreadMove + spray;
+    const spray = Math.min(state.shots, 12) * state.def.recoilUp * 0.55;
+    return state.def.spreadBase + speedRatio * state.def.spreadMove + spray;
   }
 
   /** Consume a round; returns the aim offset this shot carries, or null if it cannot fire. */
   function fire(speedRatio, random) {
     if (!ready()) return null;
     state.mag -= 1;
-    state.cooldown = def.rate;
+    state.cooldown = state.def.rate;
     state.held = 0.12;
     state.shots += 1;
     const coneAngle = cone(speedRatio);
     const angle = random() * Math.PI * 2;
     const radius = Math.sqrt(random()) * coneAngle;
     // The gun kicks up and to a side that alternates in a slow figure, the classic spray shape.
-    const climb = def.recoilUp * (1 + Math.min(state.shots, 10) * 0.16);
-    const drift = Math.sin(state.shots * 0.9) * def.recoilSide * (1 + Math.min(state.shots, 10) * 0.2);
+    const climb = state.def.recoilUp * (1 + Math.min(state.shots, 10) * 0.16);
+    const drift = Math.sin(state.shots * 0.9) * state.def.recoilSide * (1 + Math.min(state.shots, 10) * 0.2);
     state.recoilPitch += climb;
     state.recoilYaw += drift;
     return {
@@ -177,8 +187,8 @@ export function createWeapon(def) {
   }
 
   function refill() {
-    state.mag = def.mag;
-    state.reserve = def.reserve;
+    state.mag = state.def.mag;
+    state.reserve = state.def.reserve;
     state.cooldown = 0;
     state.reloading = 0;
     state.recoilPitch = 0;

@@ -48,7 +48,7 @@ export function createBody(colliders, spawn) {
     const h = heightNow();
     const p = state.position;
     for (const c of colliders) {
-      if (c.maxY <= p.y + 0.28 || c.minY >= p.y + h) continue;
+      if (c.maxY <= p.y + 0.34 || c.minY >= p.y + h) continue; // a kerb is a step, not a wall
       const minX = c.minX - half;
       const maxX = c.maxX + half;
       const minZ = c.minZ - half;
@@ -69,7 +69,7 @@ export function createBody(colliders, spawn) {
     }
   }
 
-  function step(dt, keys) {
+  function step(dt, keys, speedScale = 1) {
     const p = state.position;
     const v = state.velocity;
 
@@ -91,11 +91,12 @@ export function createBody(colliders, spawn) {
     const wishX = -sin * forward + cos * strafe;
     const wishZ = -cos * forward - sin * strafe;
 
-    const crouching = keys.has('ControlLeft') || keys.has('KeyC');
+    const crouching = keys.has('KeyC');
     const walking = keys.has('ShiftLeft');
     state.crouch += ((crouching && state.onGround ? 1 : 0) - state.crouch) * Math.min(1, dt * 12);
 
-    const maxSpeed = crouching ? CROUCH_SPEED : walking ? WALK_SPEED : RUN_SPEED;
+    // A scope costs you the run: the caller scales the top speed while the eye is down the tube.
+    const maxSpeed = (crouching ? CROUCH_SPEED : walking ? WALK_SPEED : RUN_SPEED) * speedScale;
     const accel = state.onGround ? ACCEL : AIR_ACCEL;
 
     if (state.onGround) {
@@ -196,4 +197,3 @@ export function createBody(colliders, spawn) {
   return { state, step, look, addRecoil, eyePosition, reset, RADIUS, STAND_HEIGHT, CROUCH_HEIGHT };
 }
 
-export const SPEEDS = { RUN_SPEED, WALK_SPEED, CROUCH_SPEED };

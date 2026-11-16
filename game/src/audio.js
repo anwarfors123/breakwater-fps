@@ -53,7 +53,12 @@ export function createAudio() {
     return g;
   }
 
+  function live() {
+    return !!ctx && !muted && ctx.state === 'running';
+  }
+
   function burst({ level, decay, filter, q = 1, pan = 0 }) {
+    if (!live()) return;
     const src = ctx.createBufferSource();
     src.buffer = noise;
     const bq = ctx.createBiquadFilter();
@@ -71,6 +76,7 @@ export function createAudio() {
   }
 
   function tone({ freq, to, level, decay, type = 'sine', pan = 0 }) {
+    if (!live()) return;
     const osc = ctx.createOscillator();
     osc.type = type;
     osc.frequency.setValueAtTime(freq, ctx.currentTime);
@@ -85,20 +91,24 @@ export function createAudio() {
 
   // A shot is three layers: the crack, the body and a short tail. Heavier rounds are lower and
   // longer, which is what makes the rifle and the SMG tell apart with the eyes closed.
-  function shot(kind, pan = 0) {
+  function shot(kind, pan = 0, distance = 0) {
     if (!ctx || muted) return;
+    // Air and distance: a rifle 50 m away is a thud, not a crack beside your ear.
+    const near = 1 / (1 + distance / 16);
+    const gainAt = (level) => level * Math.max(0.06, near);
+    pan = pan * Math.min(1, 2 * near);
     if (kind === 'rifle') {
-      burst({ level: 0.5, decay: 0.19, filter: 3200, q: 0.8, pan });
-      tone({ freq: 190, to: 60, level: 0.34, decay: 0.16, type: 'triangle', pan });
+      burst({ level: gainAt(0.5), decay: 0.19, filter: 3200, q: 0.8, pan });
+      tone({ freq: 190, to: 60, level: gainAt(0.34), decay: 0.16, type: 'triangle', pan });
     } else if (kind === 'smg') {
-      burst({ level: 0.34, decay: 0.1, filter: 4200, q: 0.7, pan });
-      tone({ freq: 260, to: 120, level: 0.2, decay: 0.08, type: 'square', pan });
+      burst({ level: gainAt(0.34), decay: 0.1, filter: 4200, q: 0.7, pan });
+      tone({ freq: 260, to: 120, level: gainAt(0.2), decay: 0.08, type: 'square', pan });
     } else if (kind === 'sniper') {
-      burst({ level: 0.6, decay: 0.34, filter: 2600, q: 1.1, pan });
-      tone({ freq: 130, to: 42, level: 0.4, decay: 0.3, type: 'triangle', pan });
+      burst({ level: gainAt(0.6), decay: 0.34, filter: 2600, q: 1.1, pan });
+      tone({ freq: 130, to: 42, level: gainAt(0.4), decay: 0.3, type: 'triangle', pan });
     } else {
-      burst({ level: 0.28, decay: 0.08, filter: 3600, q: 0.6, pan });
-      tone({ freq: 320, to: 160, level: 0.16, decay: 0.06, type: 'square', pan });
+      burst({ level: gainAt(0.28), decay: 0.08, filter: 3600, q: 0.6, pan });
+      tone({ freq: 320, to: 160, level: gainAt(0.16), decay: 0.06, type: 'square', pan });
     }
   }
 
@@ -118,7 +128,7 @@ export function createAudio() {
   }
 
   function reload(kind) {
-    if (!ctx || muted) return;
+    if (!live()) return;
     const at = ctx.currentTime;
     // Two mechanical clicks: magazine out, magazine in.
     for (const [offset, level] of [[0, 0.16], [kind === 'sniper' ? 0.75 : 0.42, 0.2]]) {

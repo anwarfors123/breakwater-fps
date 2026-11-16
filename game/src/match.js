@@ -1,11 +1,8 @@
-// The round, which is the actual game: a freeze time to spend money in, a live round that ends
-// when one side is eliminated or the charge resolves, and a short settle before the next one.
-// Money is the spine of it — you lose a round, you keep a little, you buy what you can afford,
-// and a team that loses three in a row is dangerous again. First to thirteen, sides swap at
-// twelve, exactly the shape a tactical shooter has had for twenty years.
-//
-// This module owns no geometry and no bodies: it owns the clock, the score, the economy, the
-// charge, and the callbacks the rest of the game reacts to.
+// The round: a freeze to spend money in, a live round that ends on elimination or on the charge,
+// and a settle before the next one. Money is the spine — lose a round, keep a little, buy what you
+// can afford. First to thirteen, sides swap at twelve. No geometry and no bodies live here: this
+// module owns the clock, the score, the economy, the charge and the callbacks.
+import { WEAPONS } from './weapons.js';
 
 export const PHASE = {
   warmup: 'warmup',
@@ -20,7 +17,7 @@ const FREEZE_SECONDS = 15;
 const ROUND_SECONDS = 100;
 const SETTLE_SECONDS = 5;
 const HALFTIME_SECONDS = 8;
-const BOMB_SECONDS = 40;
+const BOMB_SECONDS = 30;
 const PLANT_SECONDS = 3.2;
 const DEFUSE_SECONDS = 6.5;
 const ROUNDS_PER_HALF = 12;
@@ -115,20 +112,21 @@ export function createMatch({ audio, random, sites }) {
   }
 
   /** Called by whoever resolves a kill, so the economy and the feed stay in one place. */
-  function onKill(attackerTeam, victimTeam, victimName, attackerName, weaponName, headshot) {
+  function onKill(attackerTeam, victimTeam, victimName, attackerName, weaponName, headshot, byPlayer = false) {
     if (attackerTeam !== victimTeam) {
-      if (attackerTeam === state.playerTeam) state.playerMoney = Math.min(ECONOMY.max, state.playerMoney + ECONOMY.kill);
+      // Only your own kills pay you: a teammate's kill pays the team, not your wallet.
+      if (byPlayer && attackerTeam === state.playerTeam) state.playerMoney = Math.min(ECONOMY.max, state.playerMoney + ECONOMY.kill);
       state.teamMoney[attackerTeam] = Math.min(ECONOMY.max, state.teamMoney[attackerTeam] + ECONOMY.kill);
     }
     emit('kill', `${attackerName} ▸ ${victimName}`, { headshot, weaponName, attackerTeam });
   }
 
-  function plant(site, byTeam) {
+  function plant(site, byTeam, x = site.x, z = site.z) {
     if (state.bomb) return false;
     state.bomb = {
       state: 'planted',
-      x: site.x,
-      z: site.z,
+      x,
+      z,
       site,
       timer: BOMB_SECONDS,
       defuseProgress: 0,
@@ -250,16 +248,25 @@ export function createMatch({ audio, random, sites }) {
     return state;
   }
 
-  function buy(weaponId, playerHasPrimary) {
+  function buy(weaponId, playerHasPrimary, currentWeaponId) {
     if (state.phase !== PHASE.freeze && state.phase !== PHASE.live) return { ok: false, reason: 'buy time is over' };
     if (weaponId === 'bastion') {
       if (state.playerMoney < 650) return { ok: false, reason: 'not enough' };
       state.playerMoney -= 650;
       return { ok: true, kind: 'armour' };
     }
+    if (weaponId === 'frag') {
+      if (state.playerMoney < 300) return { ok: false, reason: 'not enough' };
+      state.playerMoney -= 300;
+      return { ok: true, kind: 'grenade' };
+    }
     const def = WEAPONS_PRICE[weaponId];
     if (!def) return { ok: false, reason: 'unknown' };
-    if (playerHasPrimary && def.slot === 'primary') return { ok: false, reason: 'already armed' };
+    // A primary you already carry is swapped for the new one: a rifle kept across rounds must not
+    // lock you out of the shop. Buying the one you already hold is the only refusal.
+    if (playerHasPrimary && def.slot === 'primary' && weaponId === currentWeaponId) {
+      return { ok: false, reason: 'already armed' };
+    }
     if (state.playerMoney < def.price) return { ok: false, reason: 'not enough' };
     state.playerMoney -= def.price;
     return { ok: true, kind: 'weapon' };
@@ -281,13 +288,7 @@ export function createMatch({ audio, random, sites }) {
   return { state, step, beginFreeze, beginLive, endRound, onKill, plant, defuse, explode, buy, reset, pickSite, siteFor, PHASE };
 }
 
-// Prices are read from the weapon table, but this module must not import the whole arsenal just
-// to price a purchase, so the numbers live here too and the two are checked by the buy menu.
-const WEAPONS_PRICE = {
-  skiff: { price: 1250, slot: 'primary' },
-  harbor: { price: 2900, slot: 'primary' },
-  longline: { price: 4500, slot: 'primary' },
-  tally: { price: 0, slot: 'sidearm' },
-};
+// Prices come from the arsenal itself: one table, so the buy menu and the economy cannot disagree.
+const WEAPONS_PRICE = WEAPONS;
 
 export const ROUND_CONSTANTS = { FREEZE_SECONDS, ROUND_SECONDS, BOMB_SECONDS, PLANT_SECONDS, DEFUSE_SECONDS, WIN_ROUNDS };

@@ -2,17 +2,17 @@
 // Every colour the 3D scene and the HUD use comes from here, so the game reads as one object
 // and not a pile of borrowed parts. The same names are CSS custom properties in index.html.
 export const PALETTE = {
-  canvas: '#12171c',
-  surface: '#1b2229',
-  hairline: '#2b343d',
-  ink: '#e8e4dc',
-  muted: '#8e9aa4',
-  accent: '#f2a63b',
-  dock: '#c8622f', // Dockers, the attacking side
-  warden: '#3f8fb0', // Wardens, the defending side
-  steel: '#5a6672',
-  rust: '#7a4a33',
-  concrete: '#6e7278',
+  canvas: '#1d242b',
+  surface: '#28313a',
+  hairline: '#3b4650',
+  ink: '#f2efe8',
+  muted: '#a3aeb8',
+  accent: '#ffb347',
+  dock: '#d9713a', // Dockers, the attacking side
+  warden: '#59a8c9', // Wardens, the defending side
+  steel: '#77848f',
+  rust: '#8f5a3f',
+  concrete: '#8b9096',
 };
 
 export function shade(name) {

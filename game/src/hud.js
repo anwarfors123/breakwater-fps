@@ -39,10 +39,24 @@ export function createHud() {
     overlayCopy: $('overlay-copy'),
     overlayButton: $('overlay-button'),
     objective: $('objective'),
+    killnotice: $('killnotice'),
+    grenades: $('grenades'),
   };
 
   let bannerTimer = 0;
   let hitTimer = 0;
+  let noticeTimer = 0;
+
+  /** A kill you made: name, headshot tag and the money it paid. */
+  function killNotice(name, meta = {}) {
+    if (!el.killnotice) return;
+    el.killnotice.innerHTML =
+      `<span class="kn-tag">${meta.headshot ? 'HEADSHOT' : 'ELIMINATED'}</span>` +
+      `<span class="kn-name">${name}</span>` +
+      (meta.reward ? `<span class="kn-money">+$${meta.reward}</span>` : '');
+    el.killnotice.classList.add('on');
+    noticeTimer = 2.2;
+  }
 
   function setVitals(health, armour) {
     const hp = Math.max(0, Math.round(health));
@@ -59,6 +73,13 @@ export function createHud() {
     el.ammoWrap.classList.toggle('empty', mag === 0);
     el.ammoWrap.dataset.weapon = weaponName ?? '';
     el.ammoWrap.classList.toggle('reloading', Boolean(reloading));
+  }
+
+  /** How many frags are left in the pouch; the line dims to nothing when there are none. */
+  function setGrenades(count) {
+    if (!el.grenades) return;
+    el.grenades.textContent = count > 0 ? `FRAG ${count} · G` : 'FRAG 0';
+    el.grenades.classList.toggle('has', count > 0);
   }
 
   function setMoney(amount) {
@@ -128,7 +149,7 @@ export function createHud() {
     el.prompt.hidden = !text;
   }
 
-  function showBuy(weapons, money, armourOwned) {
+  function showBuy(weapons, money, armourOwned, fragOwned = 0) {
     el.buyGrid.innerHTML = '';
     for (const w of weapons) {
       const button = document.createElement('button');
@@ -157,6 +178,18 @@ export function createHud() {
       <span class="buy-stat">100 points · absorbs body shots</span>
       <span class="buy-price">$650</span>`;
     el.buyGrid.appendChild(vest);
+    const frag = document.createElement('button');
+    frag.type = 'button';
+    frag.className = 'buy-item';
+    frag.dataset.weapon = 'frag';
+    frag.disabled = money < 300 || fragOwned >= 1;
+    frag.innerHTML = `
+      <span class="buy-key">6</span>
+      <span class="buy-name">Frag</span>
+      <span class="buy-slot">Gear</span>
+      <span class="buy-stat">118 blast · 5 m · thrown on G</span>
+      <span class="buy-price">$300</span>`;
+    el.buyGrid.appendChild(frag);
     el.buy.hidden = false;
   }
 
@@ -215,6 +248,10 @@ export function createHud() {
       bannerTimer -= dt;
       if (bannerTimer <= 0) el.banner.classList.remove('on');
     }
+    if (noticeTimer > 0) {
+      noticeTimer -= dt;
+      if (noticeTimer <= 0) el.killnotice?.classList.remove('on');
+    }
   }
 
   return {
@@ -222,11 +259,13 @@ export function createHud() {
     setVitals,
     setAmmo,
     setMoney,
+    setGrenades,
     setClock,
     setScores,
     setObjective,
     feed,
     banner,
+    killNotice,
     hitMarker,
     setSpread,
     setPrompt,

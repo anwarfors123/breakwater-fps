@@ -6,6 +6,7 @@ export function createInput(canvas, onLockChange) {
   const state = {
     keys: new Set(),
     firing: false,
+    aiming: false,
     lookX: 0,
     lookY: 0,
     locked: false,
@@ -28,24 +29,32 @@ export function createInput(canvas, onLockChange) {
 
   function onMouseMove(event) {
     if (!state.locked) return;
-    state.lookX += event.movementX * state.sensitivity;
-    state.lookY += event.movementY * state.sensitivity;
+    // A pointer-lock glitch can report a jump of thousands of pixels; a hand never does in one event.
+    const dx = Math.max(-220, Math.min(220, event.movementX));
+    const dy = Math.max(-220, Math.min(220, event.movementY));
+    state.lookX += dx * state.sensitivity;
+    state.lookY += dy * state.sensitivity;
   }
 
   function onMouseDown(event) {
     if (!state.locked) return;
     if (event.button === 0) state.firing = true;
-    if (event.button === 2) pressed.add('Mouse2');
+    if (event.button === 2) {
+      state.aiming = true;
+      pressed.add('Mouse2');
+    }
   }
 
   function onMouseUp(event) {
     if (event.button === 0) state.firing = false;
+    if (event.button === 2) state.aiming = false;
   }
 
   function onLock() {
     state.locked = document.pointerLockElement === canvas;
     if (!state.locked) {
       state.firing = false;
+      state.aiming = false;
       state.keys.clear();
     }
     onLockChange(state.locked);
@@ -54,6 +63,8 @@ export function createInput(canvas, onLockChange) {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('mousemove', onMouseMove);
+  // The right button aims, so it must not open the browser's menu over the yard.
+  window.addEventListener('contextmenu', (event) => event.preventDefault());
   window.addEventListener('mousedown', onMouseDown);
   window.addEventListener('mouseup', onMouseUp);
   window.addEventListener('blur', () => {
