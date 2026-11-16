@@ -1,8 +1,6 @@
-// All sound is synthesised at runtime with WebAudio: no audio files ship with the game, so the
-// repository stays a few hundred kilobytes of readable source. Every cue is a short graph of an
-// oscillator, a noise buffer and a filter envelope; the mix is deliberately dry and close, the
-// way a small concrete yard sounds. The context is created lazily on the first user gesture,
-// because browsers refuse to start one before that.
+// Every sound is synthesised at runtime with WebAudio: no audio file ships with the repository. A
+// cue is a short graph of an oscillator, a noise buffer and a filter envelope. The context is
+// created on the first user gesture, because browsers refuse to start one before that.
 
 const NOISE_SECONDS = 1;
 
@@ -12,6 +10,7 @@ export function createAudio() {
   let noise = null;
   let muted = false;
 
+  /** Build the context, master bus and noise buffer on first use. */
   function ensure() {
     if (ctx) return ctx;
     const Ctor = window.AudioContext ?? window.webkitAudioContext;
@@ -20,25 +19,24 @@ export function createAudio() {
     master = ctx.createGain();
     master.gain.value = 0.5;
     master.connect(ctx.destination);
-    // One second of white noise, reused by every cue that needs a transient.
+    // One second of darkened noise: cheaper than pure white, reads as gravel.
     noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
     const data = noise.getChannelData(0);
-    let last = 0;
+    let running = 0;
     for (let i = 0; i < data.length; i += 1) {
-      // Slightly darkened noise: cheaper on the ear than pure white, and it reads as gravel.
-      const white = Math.random() * 2 - 1;
-      last = last * 0.35 + white * 0.65;
-      data[i] = last;
+      running = running * 0.35 + (Math.random() * 2 - 1) * 0.65;
+      data[i] = running;
     }
     return ctx;
   }
 
-  /** Resume the context; call from a click or key handler. */
+  /** Resume the context. Call it from a click or a key handler, never on load. */
   function unlock() {
     const c = ensure();
     if (c && c.state === 'suspended') c.resume();
   }
 
+  /** A gain on the master bus, optionally in the stereo field. */
   function gain(level, pan = 0) {
     const g = ctx.createGain();
     g.gain.value = level;
@@ -53,10 +51,12 @@ export function createAudio() {
     return g;
   }
 
+  /** Is there a running, unmuted context? */
   function live() {
     return !!ctx && !muted && ctx.state === 'running';
   }
 
+  /** A filtered noise transient: a shot's crack, a boot, an impact. */
   function burst({ level, decay, filter, q = 1, pan = 0 }) {
     if (!live()) return;
     const src = ctx.createBufferSource();
@@ -75,6 +75,7 @@ export function createAudio() {
     src.stop(ctx.currentTime + decay + 0.02);
   }
 
+  /** A pitched blip, optionally gliding to `to`. */
   function tone({ freq, to, level, decay, type = 'sine', pan = 0 }) {
     if (!live()) return;
     const osc = ctx.createOscillator();
@@ -89,29 +90,33 @@ export function createAudio() {
     osc.stop(ctx.currentTime + decay + 0.02);
   }
 
-  // A shot is three layers: the crack, the body and a short tail. Heavier rounds are lower and
-  // longer, which is what makes the rifle and the SMG tell apart with the eyes closed.
+  // A shot is three layers: crack, body, tail. A heavier round is lower and longer.
   function shot(kind, pan = 0, distance = 0) {
     if (!ctx || muted) return;
     // Air and distance: a rifle 50 m away is a thud, not a crack beside your ear.
     const near = 1 / (1 + distance / 16);
-    const gainAt = (level) => level * Math.max(0.06, near);
+    const at = (level) => level * Math.max(0.06, near);
     pan = pan * Math.min(1, 2 * near);
     if (kind === 'rifle') {
-      burst({ level: gainAt(0.5), decay: 0.19, filter: 3200, q: 0.8, pan });
-      tone({ freq: 190, to: 60, level: gainAt(0.34), decay: 0.16, type: 'triangle', pan });
-    } else if (kind === 'smg') {
-      burst({ level: gainAt(0.34), decay: 0.1, filter: 4200, q: 0.7, pan });
-      tone({ freq: 260, to: 120, level: gainAt(0.2), decay: 0.08, type: 'square', pan });
-    } else if (kind === 'sniper') {
-      burst({ level: gainAt(0.6), decay: 0.34, filter: 2600, q: 1.1, pan });
-      tone({ freq: 130, to: 42, level: gainAt(0.4), decay: 0.3, type: 'triangle', pan });
-    } else {
-      burst({ level: gainAt(0.28), decay: 0.08, filter: 3600, q: 0.6, pan });
-      tone({ freq: 320, to: 160, level: gainAt(0.16), decay: 0.06, type: 'square', pan });
+      burst({ level: at(0.5), decay: 0.19, filter: 3200, q: 0.8, pan });
+      tone({ freq: 190, to: 60, level: at(0.34), decay: 0.16, type: 'triangle', pan });
+      return;
     }
+    if (kind === 'smg') {
+      burst({ level: at(0.34), decay: 0.1, filter: 4200, q: 0.7, pan });
+      tone({ freq: 260, to: 120, level: at(0.2), decay: 0.08, type: 'square', pan });
+      return;
+    }
+    if (kind === 'sniper') {
+      burst({ level: at(0.6), decay: 0.34, filter: 2600, q: 1.1, pan });
+      tone({ freq: 130, to: 42, level: at(0.4), decay: 0.3, type: 'triangle', pan });
+      return;
+    }
+    burst({ level: at(0.28), decay: 0.08, filter: 3600, q: 0.6, pan });
+    tone({ freq: 320, to: 160, level: at(0.16), decay: 0.06, type: 'square', pan });
   }
 
+  /** A trigger with nothing behind it. */
   function dryFire() {
     if (!ctx || muted) return;
     burst({ level: 0.12, decay: 0.035, filter: 2400, q: 2 });
@@ -127,11 +132,15 @@ export function createAudio() {
     tone({ freq: lethal ? 880 : 620, to: lethal ? 440 : 500, level: 0.16, decay: 0.09, type: 'square' });
   }
 
+  /** Two mechanical clicks: magazine out, magazine in. */
   function reload(kind) {
     if (!live()) return;
     const at = ctx.currentTime;
-    // Two mechanical clicks: magazine out, magazine in.
-    for (const [offset, level] of [[0, 0.16], [kind === 'sniper' ? 0.75 : 0.42, 0.2]]) {
+    const clicks = [
+      [0, 0.16],
+      [kind === 'sniper' ? 0.75 : 0.42, 0.2],
+    ];
+    for (const [offset, level] of clicks) {
       const src = ctx.createBufferSource();
       src.buffer = noise;
       const bq = ctx.createBiquadFilter();
@@ -177,6 +186,7 @@ export function createAudio() {
     });
   }
 
+  /** Mute or unmute the mix; returns the new state. */
   function toggle() {
     muted = !muted;
     if (master) master.gain.value = muted ? 0 : 0.5;

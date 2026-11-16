@@ -1,8 +1,8 @@
-// BREAKWATER — a container terminal at dusk. Every solid thing in it is a box, because a box is
-// honest: it collides, it occludes and it reads at a glance. Two objectives sit north of mid, one in
-// the warehouse (A) and one among the container stacks (B); attackers enter from the south gate and
-// every route funnels through mid. This module owns the geometry, the colliders, the shootables, the
-// spawns, the objectives and the navigation lattice.
+// BREAKWATER — a container terminal at dusk. Every solid thing is a box, because a box is honest:
+// it collides, it occludes and it reads at a glance. Two objectives sit north of mid, one in the
+// warehouse (A) and one in the stacks (B); attackers enter from the south gate and every route
+// funnels through mid. This module owns the geometry, the colliders, the shootables, the spawns,
+// the objectives and the navigation lattice.
 
 import * as THREE from 'three';
 import { PALETTE, rgb } from './palette.js';
@@ -55,8 +55,7 @@ export function createWorld(scene) {
 
   /**
    * One solid volume, three jobs: a mesh for the eye, a collider for the feet, a shootable for the
-   * bullets. `solid: false` builds a decorative piece that stops nothing — a roof lip, a painted
-   * line, a spawn apron.
+   * bullets. `solid: false` builds a decorative piece that stops nothing.
    */
   function solid(x, y, z, w, h, d, mat, opts = {}) {
     const mesh = new THREE.Mesh(opts.round ? cylinderGeo : boxGeo, mat);
@@ -80,7 +79,7 @@ export function createWorld(scene) {
     return mesh;
   }
 
-  // The apron: one plane, and it takes bullets so a missed shot still raises dust.
+  // The apron: one plane, and it takes bullets, so a missed shot still raises dust.
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), mats.asphalt);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -95,7 +94,7 @@ export function createWorld(scene) {
     group.add(line);
   }
 
-  // Perimeter wall, high enough that nobody reads the void past it.
+  // Perimeter wall: high enough that nobody reads the void past it.
   const WALL_H = 6.5;
   solid(0, 0, BOUNDS.minZ - 0.6, 62, WALL_H, 1.2, mats.wall);
   solid(0, 0, BOUNDS.maxZ + 0.6, 62, WALL_H, 1.2, mats.wall);
@@ -112,7 +111,7 @@ export function createWorld(scene) {
   solid(wx - 6.5, 0, -1, 7, 5.4, 0.9, mats.wall); // south wall, west of the doorway
   solid(wx + 6.5, 0, -1, 7, 5.4, 0.9, mats.wall); // south wall, east of the doorway
   solid(wx, 3.9, -1, 6, 1.5, 0.9, mats.wall); // header over the doorway
-  // Roof and trusses: the interior is a room, not an open pen.
+  // Roof and trusses: the interior is a room, not a pen.
   solid(wx, 5.4, -11, 21, 0.5, 21, mats.concrete, { solid: false, cast: true });
   for (let i = -2; i <= 2; i += 1) {
     solid(wx + i * 4.6, 4.6, -11, 0.35, 0.8, 20, mats.steel, { solid: false });
@@ -123,8 +122,8 @@ export function createWorld(scene) {
   solid(wx - 1.5, 0, -18.5, 3.4, 1.6, 1.6, mats.crate);
   solid(wx + 2.5, 1.6, -18.5, 1.6, 1.6, 1.6, mats.crate);
 
-  // Container yard, objective B (east). A stack is one call: tiers of 2.6 m, top tier in the
-  // caller's material so the silhouettes differ.
+  // Container yard, objective B (east). A stack is one call: 2.6 m tiers, top in the caller's
+  // material so silhouettes differ.
   const bx = 17;
   const stack = (x, z, along, tiers = 2, mat = mats.steel) => {
     for (let t = 0; t < tiers; t += 1) {
@@ -168,7 +167,7 @@ export function createWorld(scene) {
     solid(x, 0, z, 1.5, 1.5, 1.5, mats.crate);
   }
 
-  // Dock lamps: the light the yard is really lit by, and its depth cues.
+  // Dock lamps: the light the yard is really lit by.
   const halos = [];
   const rings = [];
   const lampPosts = [
@@ -210,7 +209,7 @@ export function createWorld(scene) {
     shootables.push(pole);
   }
 
-  // Objectives: a painted ring and a mast each, readable from the opposite spawn.
+  // Objectives: a painted ring and a mast each, readable from the far spawn.
   const sites = [
     { id: 'A', name: 'Warehouse', x: wx + 0.5, z: -12.5, radius: 5.2 },
     { id: 'B', name: 'Container yard', x: bx, z: -13, radius: 5.0 },
@@ -234,7 +233,7 @@ export function createWorld(scene) {
     group.add(mast);
   }
 
-  // Sky: a three-band dome, so the yard has a horizon instead of a flat fill behind the wall.
+  // Sky: a three-band dome, so the yard has a horizon behind the wall.
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(150, 24, 16),
     new THREE.ShaderMaterial({
@@ -292,7 +291,7 @@ export function createWorld(scene) {
   rim.position.set(-24, 16, -26);
   scene.add(rim);
 
-  // Spawns, five a side, facing the map's middle.
+  // Spawns, five a side, facing mid.
   const spawns = {
     dock: [
       { x: -5, z: 27, yaw: Math.PI },
@@ -310,7 +309,7 @@ export function createWorld(scene) {
     ],
   };
 
-  // The lattice the bots path on: coarse, pruned and built once.
+  // The lattice the bots path on.
   const nav = buildLattice(colliders);
 
   function blockedAt(x, z, radius = BOT_RADIUS) {
@@ -329,7 +328,7 @@ export function createWorld(scene) {
     return false;
   }
 
-  /** The highest walkable surface under a point, so a bot standing on a crate is not a bug. */
+  /** Highest walkable surface under a point, so a bot on a crate is not a bug. */
   function groundAt(x, z, from = 2.2) {
     let best = 0;
     for (const c of colliders) {
@@ -341,7 +340,7 @@ export function createWorld(scene) {
   }
 
   // Bake the transforms now: the world never moves, and a raycast before the first render would
-  // otherwise see every plane in its unrotated pose.
+  // otherwise see every plane unrotated.
   group.updateMatrixWorld(true);
 
   // The map breathes: objective rings pulse, lamp halos flicker, so the yard is not a photograph.
@@ -387,7 +386,7 @@ function buildLattice(colliders) {
     }
   }
 
-  /** The node nearest a point: every post a bot is sent to is one of these. */
+  /** The node nearest a point: every post a bot is sent to is one. */
   const at = (x, z) => {
     let best = -1;
     let bestD = Infinity;
