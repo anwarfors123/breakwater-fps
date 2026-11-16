@@ -1,6 +1,8 @@
-// Input: the keyboard as a set of held codes, the mouse as a look delta the frame consumes, and
-// pointer lock as the thing that makes aiming possible. Nothing here knows about the game — it
-// reports what the hands did, and the loop decides what that means.
+// Input: the keyboard as a set of held codes, the mouse as a look delta the frame consumes, pointer
+// lock as the thing that makes aiming possible. It reports what the hands did.
+
+const SENSITIVITY = 0.0022; // radians per pixel at the base field of view
+const DELTA_CEILING = 220; // pixels: a pointer-lock glitch, never a hand, jumps further than this
 
 export function createInput(canvas, onLockChange) {
   const state = {
@@ -10,49 +12,47 @@ export function createInput(canvas, onLockChange) {
     lookX: 0,
     lookY: 0,
     locked: false,
-    sensitivity: 0.0022,
+    sensitivity: SENSITIVITY,
   };
-  const pressed = new Set(); // one-shot presses, drained by the loop
-  const handlers = { key: [], click: [] };
 
-  function onKeyDown(event) {
-    // Tab is the scoreboard, so it must not move focus; space must not scroll.
+  // Press handlers registered with onKey, called with the code of each key that goes down.
+  const listeners = [];
+
+  const clamp = (v) => Math.max(-DELTA_CEILING, Math.min(DELTA_CEILING, v));
+
+  function handleKeyDown(event) {
+    // Tab is the scoreboard and must not move focus out of the game; space must not scroll.
     if (event.code === 'Tab' || event.code === 'Space') event.preventDefault();
-    if (!state.keys.has(event.code)) pressed.add(event.code);
     state.keys.add(event.code);
-    for (const handler of handlers.key) handler(event.code, event);
+    for (const listener of listeners) listener(event.code, event);
   }
 
-  function onKeyUp(event) {
+  function handleKeyUp(event) {
     state.keys.delete(event.code);
   }
 
-  function onMouseMove(event) {
+  function handleMouseMove(event) {
     if (!state.locked) return;
-    // A pointer-lock glitch can report a jump of thousands of pixels; a hand never does in one event.
-    const dx = Math.max(-220, Math.min(220, event.movementX));
-    const dy = Math.max(-220, Math.min(220, event.movementY));
-    state.lookX += dx * state.sensitivity;
-    state.lookY += dy * state.sensitivity;
+    // One event is one hand movement: the ceiling only ever catches a broken delta, never a flick.
+    state.lookX += clamp(event.movementX ?? 0) * state.sensitivity;
+    state.lookY += clamp(event.movementY ?? 0) * state.sensitivity;
   }
 
-  function onMouseDown(event) {
+  function handleMouseDown(event) {
     if (!state.locked) return;
     if (event.button === 0) state.firing = true;
-    if (event.button === 2) {
-      state.aiming = true;
-      pressed.add('Mouse2');
-    }
+    if (event.button === 2) state.aiming = true;
   }
 
-  function onMouseUp(event) {
+  function handleMouseUp(event) {
     if (event.button === 0) state.firing = false;
     if (event.button === 2) state.aiming = false;
   }
 
-  function onLock() {
+  function handleLockChange() {
     state.locked = document.pointerLockElement === canvas;
     if (!state.locked) {
+      // A lost lock is a lost trigger: a gun that keeps firing after alt-tab is the worst bug here.
       state.firing = false;
       state.aiming = false;
       state.keys.clear();
@@ -60,53 +60,48 @@ export function createInput(canvas, onLockChange) {
     onLockChange(state.locked);
   }
 
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('mousemove', onMouseMove);
-  // The right button aims, so it must not open the browser's menu over the yard.
-  window.addEventListener('contextmenu', (event) => event.preventDefault());
-  window.addEventListener('mousedown', onMouseDown);
-  window.addEventListener('mouseup', onMouseUp);
-  window.addEventListener('blur', () => {
+  function handleBlur() {
+    // A window that loses focus holds no keys, or the player walks into a wall forever.
     state.keys.clear();
     state.firing = false;
-  });
-  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
-  document.addEventListener('pointerlockchange', onLock);
+  }
+
+  const swallow = (event) => event.preventDefault();
+
+  // The right button aims, so neither the window nor the canvas may open a context menu.
+  window.addEventListener('keydown', handleKeyDown);
+  window.addEventListener('keyup', handleKeyUp);
+  window.addEventListener('mousemove', handleMouseMove);
+  window.addEventListener('mousedown', handleMouseDown);
+  window.addEventListener('mouseup', handleMouseUp);
+  window.addEventListener('contextmenu', swallow);
+  canvas.addEventListener('contextmenu', swallow);
+  window.addEventListener('blur', handleBlur);
+  document.addEventListener('pointerlockchange', handleLockChange);
+
+  /** The rotation accumulated since the last call, in radians. */
+  function takeLook() {
+    const delta = { x: state.lookX, y: state.lookY };
+    state.lookX = 0;
+    state.lookY = 0;
+    return delta;
+  }
 
   function requestLock() {
-    if (document.pointerLockElement !== canvas) {
-      const result = canvas.requestPointerLock?.();
-      if (result && typeof result.catch === 'function') result.catch(() => {});
-    }
+    if (document.pointerLockElement === canvas) return;
+    const asked = canvas.requestPointerLock?.();
+    // Newer Chrome returns a promise, and a refused lock (no user gesture) is not an error.
+    if (asked && typeof asked.catch === 'function') asked.catch(() => {});
   }
 
   function exitLock() {
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
-  /** Consume the accumulated look delta. */
-  function takeLook() {
-    const out = { x: state.lookX, y: state.lookY };
-    state.lookX = 0;
-    state.lookY = 0;
-    return out;
-  }
-
-  /** True once per physical press. */
-  function consume(code) {
-    if (!pressed.has(code)) return false;
-    pressed.delete(code);
-    return true;
-  }
-
-  function clearPressed() {
-    pressed.clear();
-  }
-
+  /** Follow every key press, for the one-shot keys the loop does not poll. */
   function onKey(handler) {
-    handlers.key.push(handler);
+    listeners.push(handler);
   }
 
-  return { state, takeLook, consume, clearPressed, requestLock, exitLock, onKey };
+  return { state, takeLook, requestLock, exitLock, onKey };
 }

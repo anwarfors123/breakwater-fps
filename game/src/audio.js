@@ -1,6 +1,5 @@
-// Every sound is synthesised at runtime with WebAudio: no audio file ships with the repository. A
-// cue is a short graph of an oscillator, a noise buffer and a filter envelope. The context is
-// created on the first user gesture, because browsers refuse to start one before that.
+// Every sound is synthesised at runtime with WebAudio: no audio file ships. A cue is a short graph
+// of an oscillator, a noise buffer and a filter envelope, built on the first user gesture.
 
 const NOISE_SECONDS = 1;
 
@@ -10,7 +9,7 @@ export function createAudio() {
   let noise = null;
   let muted = false;
 
-  /** Build the context, master bus and noise buffer on first use. */
+  /** Build the context, master bus and noise buffer. */
   function ensure() {
     if (ctx) return ctx;
     const Ctor = window.AudioContext ?? window.webkitAudioContext;
@@ -30,13 +29,13 @@ export function createAudio() {
     return ctx;
   }
 
-  /** Resume the context. Call it from a click or a key handler, never on load. */
+  /** Resume the context: from a click or a key handler, never on load. */
   function unlock() {
     const c = ensure();
     if (c && c.state === 'suspended') c.resume();
   }
 
-  /** A gain on the master bus, optionally in the stereo field. */
+
   function gain(level, pan = 0) {
     const g = ctx.createGain();
     g.gain.value = level;
@@ -51,12 +50,12 @@ export function createAudio() {
     return g;
   }
 
-  /** Is there a running, unmuted context? */
+
   function live() {
     return !!ctx && !muted && ctx.state === 'running';
   }
 
-  /** A filtered noise transient: a shot's crack, a boot, an impact. */
+
   function burst({ level, decay, filter, q = 1, pan = 0 }) {
     if (!live()) return;
     const src = ctx.createBufferSource();
@@ -75,7 +74,7 @@ export function createAudio() {
     src.stop(ctx.currentTime + decay + 0.02);
   }
 
-  /** A pitched blip, optionally gliding to `to`. */
+
   function tone({ freq, to, level, decay, type = 'sine', pan = 0 }) {
     if (!live()) return;
     const osc = ctx.createOscillator();
@@ -116,7 +115,7 @@ export function createAudio() {
     tone({ freq: 320, to: 160, level: at(0.16), decay: 0.06, type: 'square', pan });
   }
 
-  /** A trigger with nothing behind it. */
+
   function dryFire() {
     if (!ctx || muted) return;
     burst({ level: 0.12, decay: 0.035, filter: 2400, q: 2 });
@@ -132,7 +131,7 @@ export function createAudio() {
     tone({ freq: lethal ? 880 : 620, to: lethal ? 440 : 500, level: 0.16, decay: 0.09, type: 'square' });
   }
 
-  /** Two mechanical clicks: magazine out, magazine in. */
+
   function reload(kind) {
     if (!live()) return;
     const at = ctx.currentTime;
@@ -208,7 +207,7 @@ export function createAudio() {
     get muted() {
       return muted;
     },
-    /** Stereo position of a world point relative to the listener, for positional cues. */
+  
     panFor(dx, dz, yaw) {
       const right = Math.cos(yaw) * dx - Math.sin(yaw) * dz;
       const ahead = -Math.sin(yaw) * dx - Math.cos(yaw) * dz;

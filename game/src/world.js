@@ -10,7 +10,7 @@ import { PALETTE, rgb } from './palette.js';
 const BOUNDS = { minX: -30, maxX: 30, minZ: -32, maxZ: 32 };
 const BOT_RADIUS = 0.42;
 
-/** Every surface family gets one material and keeps it: no box is allowed to own its own. */
+/** Every surface family gets one material and keeps it. */
 function surfaceMaterials() {
   const tint = (name, k) => {
     const c = rgb(name, k);
@@ -53,10 +53,7 @@ export function createWorld(scene) {
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
   const cylinderGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12);
 
-  /**
-   * One solid volume, three jobs: a mesh for the eye, a collider for the feet, a shootable for the
-   * bullets. `solid: false` builds a decorative piece that stops nothing.
-   */
+  /** One solid volume: mesh, collider and shootable. `solid: false` stops nothing. */
   function solid(x, y, z, w, h, d, mat, opts = {}) {
     const mesh = new THREE.Mesh(opts.round ? cylinderGeo : boxGeo, mat);
     mesh.position.set(x, y + h / 2, z);
@@ -86,7 +83,7 @@ export function createWorld(scene) {
   group.add(ground);
   shootables.push(ground);
 
-  // Painted lane lines: they stop nothing, and they give the eye a ruler for distance.
+  // Painted lane lines: they stop nothing and give the eye a ruler for distance.
   for (let i = -3; i <= 3; i += 1) {
     const line = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 64), mats.hairline);
     line.rotation.x = -Math.PI / 2;
@@ -94,7 +91,7 @@ export function createWorld(scene) {
     group.add(line);
   }
 
-  // Perimeter wall: high enough that nobody reads the void past it.
+
   const WALL_H = 6.5;
   solid(0, 0, BOUNDS.minZ - 0.6, 62, WALL_H, 1.2, mats.wall);
   solid(0, 0, BOUNDS.maxZ + 0.6, 62, WALL_H, 1.2, mats.wall);
@@ -291,7 +288,7 @@ export function createWorld(scene) {
   rim.position.set(-24, 16, -26);
   scene.add(rim);
 
-  // Spawns, five a side, facing mid.
+
   const spawns = {
     dock: [
       { x: -5, z: 27, yaw: Math.PI },
@@ -309,7 +306,7 @@ export function createWorld(scene) {
     ],
   };
 
-  // The lattice the bots path on.
+
   const nav = buildLattice(colliders);
 
   function blockedAt(x, z, radius = BOT_RADIUS) {
@@ -328,7 +325,7 @@ export function createWorld(scene) {
     return false;
   }
 
-  /** Highest walkable surface under a point, so a bot on a crate is not a bug. */
+  
   function groundAt(x, z, from = 2.2) {
     let best = 0;
     for (const c of colliders) {
@@ -339,8 +336,8 @@ export function createWorld(scene) {
     return best;
   }
 
-  // Bake the transforms now: the world never moves, and a raycast before the first render would
-  // otherwise see every plane unrotated.
+  // Bake the transforms: the world never moves, and a raycast before the first render would see
+  // every plane unrotated.
   group.updateMatrixWorld(true);
 
   // The map breathes: objective rings pulse, lamp halos flicker, so the yard is not a photograph.
