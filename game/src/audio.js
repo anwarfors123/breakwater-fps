@@ -1,5 +1,5 @@
-// Every sound is synthesised at runtime with WebAudio: no audio file ships. A cue is a short graph
-// of an oscillator, a noise buffer and a filter envelope, built on the first user gesture.
+// Every sound is synthesised with WebAudio: no audio file ships. A cue is a short graph
+// of an oscillator, a noise buffer and a filter envelope, built on the first gesture.
 
 const NOISE_SECONDS = 1;
 
@@ -89,7 +89,7 @@ export function createAudio() {
     osc.stop(ctx.currentTime + decay + 0.02);
   }
 
-  // A shot is three layers: crack, body, tail. A heavier round is lower and longer.
+  // A shot is three layers: crack, body, tail.
   function shot(kind, pan = 0, distance = 0) {
     if (!ctx || muted) return;
     // Air and distance: a rifle 50 m away is a thud, not a crack beside your ear.

@@ -1,4 +1,4 @@
-// Input: the keyboard as a set of held codes, the mouse as a look delta the frame consumes, pointer
+// Input: the keyboard as held codes, the mouse as a look delta the frame consumes, pointer
 // lock as the thing that makes aiming possible. It reports what the hands did.
 
 const SENSITIVITY = 0.0022; // radians per pixel at the base field of view
@@ -33,7 +33,7 @@ export function createInput(canvas, onLockChange) {
 
   function handleMouseMove(event) {
     if (!state.locked) return;
-    // One event is one hand movement: the ceiling only ever catches a broken delta, never a flick.
+    // The ceiling only ever catches a broken delta, never a flick of the hand.
     state.lookX += clamp(event.movementX ?? 0) * state.sensitivity;
     state.lookY += clamp(event.movementY ?? 0) * state.sensitivity;
   }
@@ -52,7 +52,7 @@ export function createInput(canvas, onLockChange) {
   function handleLockChange() {
     state.locked = document.pointerLockElement === canvas;
     if (!state.locked) {
-      // A lost lock is a lost trigger: a gun that keeps firing after alt-tab is the worst bug here.
+      // A lost lock is a lost trigger: no gun may fire itself after alt-tab.
       state.firing = false;
       state.aiming = false;
       state.keys.clear();
@@ -79,7 +79,7 @@ export function createInput(canvas, onLockChange) {
   window.addEventListener('blur', handleBlur);
   document.addEventListener('pointerlockchange', handleLockChange);
 
-  /** The rotation accumulated since the last call, in radians. */
+  /** Rotation accumulated since the last call, in radians. */
   function takeLook() {
     const delta = { x: state.lookX, y: state.lookY };
     state.lookX = 0;
@@ -90,7 +90,7 @@ export function createInput(canvas, onLockChange) {
   function requestLock() {
     if (document.pointerLockElement === canvas) return;
     const asked = canvas.requestPointerLock?.();
-    // Newer Chrome returns a promise, and a refused lock (no user gesture) is not an error.
+    // Newer Chrome returns a promise; a refused lock is not an error.
     if (asked && typeof asked.catch === 'function') asked.catch(() => {});
   }
 

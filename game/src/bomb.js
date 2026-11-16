@@ -1,5 +1,5 @@
-// The charge, lying where it was planted: a case with a plate, two wires and a lamp that blinks
-// faster the closer the fuse gets to zero. Built once; planting costs a position.
+// The charge where it was planted: a case, a plate, two wires and a lamp that blinks
+// faster as the fuse runs out. Built once; planting costs a position.
 import * as THREE from 'three';
 
 const FUSE_SECONDS = 30;
@@ -63,7 +63,7 @@ export function createBombModel(scene, audio) {
   function tick(dt, fuse) {
     if (!group.visible) return;
     elapsed += dt;
-    // 0 at the start of the fuse, 1 when it is out: the lamp's period and the beep's pitch ride it.
+    // 0 at the start of the fuse, 1 when it is out: the lamp and beep ride it.
     const urgency = 1 - Math.min(1, Math.max(0, fuse) / FUSE_SECONDS);
     const period = 1.1 - urgency * 0.85; // 1.1 s apart at the start, 0.25 s at the end
     const lit = elapsed % period < period * 0.45;

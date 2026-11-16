@@ -1,13 +1,15 @@
-// The HUD is DOM, not canvas: text stays crisp at any resolution, the buy menu is a real grid
-// of real buttons, and the layout is CSS the browser already knows how to lay out. The scene
-// renders underneath it; nothing here touches WebGL.
+// The HUD is DOM, not canvas: text stays crisp at any resolution and the layout is CSS the browser
+// already knows how to lay out. The scene renders underneath it; nothing here touches WebGL.
 //
-// Everything the player is told about the round passes through this file, so the vocabulary of
-// the interface — Dockers and Wardens, the charge, the buy phase — lives in one place.
+// Everything the player is told about the round passes through here, so the interface's vocabulary
+// lives in one place.
+
+import { createBuyMenu } from './buymenu.js';
 
 const $ = (id) => document.getElementById(id);
 
 export function createHud() {
+  const shop = createBuyMenu();
   const el = {
     root: $('hud'),
     crosshair: $('crosshair'),
@@ -28,10 +30,6 @@ export function createHud() {
     killfeed: $('killfeed'),
     banner: $('banner'),
     prompt: $('prompt'),
-    buy: $('buy'),
-    buyGrid: $('buy-grid'),
-    buyMoney: $('buy-money'),
-    buyHint: $('buy-hint'),
     scoreboard: $('scoreboard'),
     sbBody: $('sb-body'),
     overlay: $('overlay'),
@@ -47,7 +45,7 @@ export function createHud() {
   let hitTimer = 0;
   let noticeTimer = 0;
 
-  /** A kill you made: name, headshot tag and the money it paid. */
+  /** A kill you made: name, headshot tag, the money it paid. */
   function killNotice(name, meta = {}) {
     if (!el.killnotice) return;
     el.killnotice.innerHTML =
@@ -75,7 +73,7 @@ export function createHud() {
     el.ammoWrap.classList.toggle('reloading', Boolean(reloading));
   }
 
-  /** How many frags are left in the pouch; the line dims to nothing when there are none. */
+  /** Frags left in the pouch; the line dims when there are none. */
   function setGrenades(count) {
     if (!el.grenades) return;
     el.grenades.textContent = count > 0 ? `FRAG ${count} · G` : 'FRAG 0';
@@ -84,7 +82,7 @@ export function createHud() {
 
   function setMoney(amount) {
     el.money.textContent = `$${Math.round(amount).toLocaleString('en-US')}`;
-    if (el.buyMoney) el.buyMoney.textContent = `$${Math.round(amount).toLocaleString('en-US')}`;
+    shop.setMoney(amount);
   }
 
   function setClock(seconds, label) {
@@ -138,7 +136,7 @@ export function createHud() {
   }
 
   function setSpread(coneRadians, moving) {
-    // The crosshair opens with the weapon's cone, which is the only honest readout of accuracy.
+    // The crosshair opens with the weapon's cone: the honest readout of accuracy.
     const px = 6 + Math.min(26, coneRadians * 900);
     el.crosshair.style.setProperty('--gap', `${px.toFixed(1)}px`);
     el.crosshair.classList.toggle('moving', Boolean(moving));
@@ -149,58 +147,9 @@ export function createHud() {
     el.prompt.hidden = !text;
   }
 
-  function showBuy(weapons, money, armourOwned, fragOwned = 0) {
-    el.buyGrid.innerHTML = '';
-    for (const w of weapons) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'buy-item';
-      button.dataset.weapon = w.id;
-      const affordable = money >= w.price;
-      button.disabled = !affordable;
-      button.innerHTML = `
-        <span class="buy-key">${w.key}</span>
-        <span class="buy-name">${w.name}</span>
-        <span class="buy-slot">${w.slot === 'primary' ? 'Primary' : 'Sidearm'}</span>
-        <span class="buy-stat">${w.damage} dmg · ${Math.round(60 / w.rate)} rpm</span>
-        <span class="buy-price">${w.price === 0 ? 'Free' : `$${w.price.toLocaleString('en-US')}`}</span>`;
-      el.buyGrid.appendChild(button);
-    }
-    const vest = document.createElement('button');
-    vest.type = 'button';
-    vest.className = 'buy-item';
-    vest.dataset.weapon = 'bastion';
-    vest.disabled = money < 650 || armourOwned >= 100;
-    vest.innerHTML = `
-      <span class="buy-key">5</span>
-      <span class="buy-name">Bastion</span>
-      <span class="buy-slot">Armour</span>
-      <span class="buy-stat">100 points · absorbs body shots</span>
-      <span class="buy-price">$650</span>`;
-    el.buyGrid.appendChild(vest);
-    const frag = document.createElement('button');
-    frag.type = 'button';
-    frag.className = 'buy-item';
-    frag.dataset.weapon = 'frag';
-    frag.disabled = money < 300 || fragOwned >= 1;
-    frag.innerHTML = `
-      <span class="buy-key">6</span>
-      <span class="buy-name">Frag</span>
-      <span class="buy-slot">Gear</span>
-      <span class="buy-stat">118 blast · 5 m · thrown on G</span>
-      <span class="buy-price">$300</span>`;
-    el.buyGrid.appendChild(frag);
-    el.buy.hidden = false;
-  }
-
-  function hideBuy() {
-    el.buy.hidden = true;
-  }
-
-  function buyHint(text, tone = '') {
-    el.buyHint.textContent = text ?? '';
-    el.buyHint.dataset.tone = tone;
-  }
+  const showBuy = (weapons, money, armourOwned, fragOwned = 0) => shop.show(weapons, money, armourOwned, fragOwned);
+  const hideBuy = () => shop.hide();
+  const buyHint = (text, tone = '') => shop.hint(text, tone);
 
   function showScoreboard(rows, scores) {
     el.sbBody.innerHTML = rows
@@ -238,7 +187,7 @@ export function createHud() {
     el.overlayButton.addEventListener('click', handler);
   }
 
-  /** Called every rendered frame; owns the short-lived elements' clocks. */
+  /** Called every frame; owns the short-lived elements' clocks. */
   function tick(dt) {
     if (hitTimer > 0) {
       hitTimer -= dt;

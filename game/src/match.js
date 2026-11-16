@@ -1,5 +1,5 @@
 // The round: a freeze to spend money in, a live round that ends on elimination or on the charge,
-// and a settle before the next one. Money is the spine — lose a round, keep a little, buy what you
+// and a settle before the next. Money is the spine: lose a round, keep a little, buy what you
 // can afford. First to thirteen, sides swap at twelve. No geometry and no bodies live here: this
 // module owns the clock, the score, the economy, the charge and the callbacks.
 import { WEAPONS } from './weapons.js';
@@ -288,7 +288,7 @@ export function createMatch({ audio, random, sites }) {
   return { state, step, beginFreeze, beginLive, endRound, onKill, plant, defuse, explode, buy, reset, pickSite, siteFor, PHASE };
 }
 
-// Prices come from the arsenal itself: one table, so the buy menu and the economy cannot disagree.
+// Prices come from the arsenal itself: one table, so the shop and the economy cannot disagree.
 const WEAPONS_PRICE = WEAPONS;
 
 export const ROUND_CONSTANTS = { FREEZE_SECONDS, ROUND_SECONDS, BOMB_SECONDS, PLANT_SECONDS, DEFUSE_SECONDS, WIN_ROUNDS };

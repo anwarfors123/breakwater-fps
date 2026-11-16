@@ -445,7 +445,7 @@ export function createBot(scene, world, options) {
 
   function step(dt, ctx) {
     if (!bot.alive) return;
-    // If the body has ended up inside a wall (spawn overlap, a shove), put it back on the lattice.
+    // If the body ends up inside a wall (spawn overlap, a shove), put it back on the lattice.
     const here = body.state.position;
     if (world.blockedAt(here.x, here.z, 0.42)) {
       const id = world.nav.at(here.x, here.z);

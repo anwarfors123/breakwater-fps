@@ -83,7 +83,7 @@ export function createWorld(scene) {
   group.add(ground);
   shootables.push(ground);
 
-  // Painted lane lines: they stop nothing and give the eye a ruler for distance.
+  // Painted lane lines: they stop nothing and give the eye a ruler.
   for (let i = -3; i <= 3; i += 1) {
     const line = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 64), mats.hairline);
     line.rotation.x = -Math.PI / 2;
@@ -98,7 +98,7 @@ export function createWorld(scene) {
   solid(BOUNDS.minX - 0.6, 0, 0, 1.2, WALL_H, 66, mats.wall);
   solid(BOUNDS.maxX + 0.6, 0, 0, 1.2, WALL_H, 66, mats.wall);
 
-  // Warehouse, objective A (west): four walls, a wide south doorway, a bay cut into the east face.
+  // Warehouse, objective A (west): four walls, a south doorway, an east bay.
   const wx = -17;
   solid(wx - 6.5, 0, -21, 7, 5.4, 0.9, mats.wall); // north wall, west of the back door
   solid(wx + 6.5, 0, -21, 7, 5.4, 0.9, mats.wall); // north wall, east of the back door
@@ -113,13 +113,13 @@ export function createWorld(scene) {
   for (let i = -2; i <= 2; i += 1) {
     solid(wx + i * 4.6, 4.6, -11, 0.35, 0.8, 20, mats.steel, { solid: false });
   }
-  // Interior cover: two crate walls that make the objective defensible from the doorway.
+  // Interior cover: two crate walls that make the objective defensible.
   solid(wx - 5.5, 0, -9, 1.6, 1.6, 6.5, mats.crate);
   solid(wx + 5.5, 0, -14, 1.6, 1.6, 5.5, mats.crate);
   solid(wx - 1.5, 0, -18.5, 3.4, 1.6, 1.6, mats.crate);
   solid(wx + 2.5, 1.6, -18.5, 1.6, 1.6, 1.6, mats.crate);
 
-  // Container yard, objective B (east). A stack is one call: 2.6 m tiers, top in the caller's
+  // Container yard, objective B (east). A stack is one call: 2.6 m tiers, top in the
   // material so silhouettes differ.
   const bx = 17;
   const stack = (x, z, along, tiers = 2, mat = mats.steel) => {
@@ -150,7 +150,7 @@ export function createWorld(scene) {
   solid(-11, 0, -2, 1.4, 1.4, 1.4, mats.crate);
   solid(11.5, 0, -1, 1.4, 1.4, 1.4, mats.crate);
 
-  // Connectors: the west wall separates the warehouse approach from mid; the east container wall
+  // Connectors: the west wall separates the warehouse approach from mid; the east
   // makes the B approach tight.
   solid(-13.5, 0, 8, 0.9, 3.2, 14, mats.concrete);
   solid(-23.5, 0, 9, 0.9, 3.2, 10, mats.concrete);
@@ -186,7 +186,7 @@ export function createWorld(scene) {
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), mats.accent);
     head.position.set(x, 5.35, z);
     group.add(head);
-    // A halo rather than a bigger bulb: the glow is what carries at distance and it costs one sphere.
+    // A halo, not a bigger bulb: the glow carries at distance and costs one sphere.
     const halo = new THREE.Mesh(
       new THREE.SphereGeometry(0.68, 12, 10),
       new THREE.MeshBasicMaterial({
@@ -263,7 +263,7 @@ export function createWorld(scene) {
   sky.frustumCulled = false;
   scene.add(sky);
 
-  // Light. A working yard at dusk, not a night: fog that lifts, a strong low sun, a bright sky
+  // Light. A working yard at dusk, not night: fog that lifts, a low sun, a bright sky
   // bounce and a flat ambient floor so shadowed faces stay readable.
   const fogColor = rgb('canvas');
   scene.fog = new THREE.Fog(new THREE.Color(fogColor.r, fogColor.g, fogColor.b), 52, 150);
@@ -340,7 +340,7 @@ export function createWorld(scene) {
   // every plane unrotated.
   group.updateMatrixWorld(true);
 
-  // The map breathes: objective rings pulse, lamp halos flicker, so the yard is not a photograph.
+  // The map breathes: rings pulse, halos flicker, so the yard is not a photograph.
   let clock = 0;
   function tick(dt) {
     clock += dt;
@@ -415,7 +415,7 @@ function buildLattice(colliders) {
         const other = index.get(key(node.x + dx, node.z + dz));
         if (other === undefined) continue;
         if (dx && dz) {
-          // No cutting a corner: a diagonal link needs both of its orthogonal neighbours to exist.
+          // No cutting a corner: a diagonal needs both orthogonal neighbours.
           const a = index.get(key(node.x + dx, node.z));
           const b = index.get(key(node.x, node.z + dz));
           if (a === undefined || b === undefined) continue;

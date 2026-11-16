@@ -312,7 +312,7 @@ function navPost(x, z) {
 }
 
 // Two target lists, rebuilt once a frame instead of once per shooter: you hit the world and the
-// bots, a bot hits the world, the other bots and you. Nothing here allocates while the round runs.
+// bots, a bot hits the world, the other bots and you. Nothing allocates mid-round.
 const playerTargets = [];
 const botTargets = [];
 
@@ -789,7 +789,7 @@ function step(dt) {
   if (playerActor.alive && !buyOpen) {
     const look = input.takeLook();
     // One pixel of mouse is one fixed turn, applied the tick it arrives. The old damped follow
-    // carried a share of every delta into later frames, so a stutter banked rotation and then spent
+    // carried a share of every delta into later frames, so a stutter banked rotation.
     // it at once: that is the "sensitivity suddenly spikes" report. A hard per-tick ceiling still
     // guards against a pointer-lock glitch reporting a 3000 px jump.
     body.look(

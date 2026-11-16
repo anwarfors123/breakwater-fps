@@ -1,6 +1,6 @@
 // The gun in your hands. One silhouette per weapon, built once at boot from a parts table, so what
 // you bought in the freeze is what you are holding: a service pistol, a compact SMG, a rifle, and
-// the long rifle with the scope. Switching weapons only toggles visibility — no mesh is built while
+// the long rifle. Switching weapons only toggles visibility — no mesh is built while
 // the round runs.
 import * as THREE from 'three';
 
@@ -8,7 +8,7 @@ const BASE = { x: 0.155, y: -0.12, z: -0.33 };
 
 // A view model is not lit like the world: it hangs 30 cm from the eye, in a dusk yard, so a
 // metallic surface with no environment map would render as a black shape. Low metalness plus a
-// little emissive keeps every edge readable, and a short-range lamp attached to the camera finishes
+// little emissive keeps every edge readable, and a lamp on the camera finishes the read.
 // the job without spilling onto the map.
 function materials() {
   return {
@@ -25,7 +25,7 @@ const b = (w, h, d, mat, x, y, z, rx = 0) => ({ kind: 'box', w, h, d, mat, x, y,
 // A cylinder lying along the barrel axis.
 const c = (r, len, mat, x, y, z, rx = Math.PI / 2) => ({ kind: 'cyl', r, len, mat, x, y, z, rx });
 
-// Local origin sits at the grip, the barrel runs toward -Z, and `muzzle` is where the flash goes.
+// Origin at the grip, barrel toward -Z, `muzzle` where the flash goes.
 const GUNS = {
   tally: {
     muzzle: [0, 0.03, -0.27],

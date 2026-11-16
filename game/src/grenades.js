@@ -1,6 +1,6 @@
-// Frag grenades: bought in the freeze, thrown from the eye, a short fuse, and a blast that walls
-// cut. The flight is plain numbers rather than vectors on purpose — nothing in this module makes a
-// new object while a grenade is in the air, only when one is thrown or bursts.
+// Frag grenades: bought in the freeze, thrown from the eye, a short fuse, a blast walls cut.
+// cut. The flight is plain numbers, and a frag is a small pooled ball, so a
+// throw costs no allocation and a reset only hides what is on the ground.
 import * as THREE from 'three';
 import { GRENADE } from './weapons.js';
 
@@ -8,6 +8,7 @@ const GRAVITY = 19;
 const SHELL = 0.09;
 const BOUNCE = 0.34;
 const RUB = 0.62;
+const POOL = 4;
 
 export function createGrenades({ scene, world, audio, onBlast }) {
   const live = [];
@@ -16,12 +17,23 @@ export function createGrenades({ scene, world, audio, onBlast }) {
   const shellMat = new THREE.MeshStandardMaterial({ color: 0x39412f, roughness: 0.85, metalness: 0.12 });
   const flashGeo = new THREE.SphereGeometry(1, 12, 9);
 
+  // The balls are built once and reused; a thrown one is visible until it bursts.
+  const pool = [];
+  for (let i = 0; i < POOL; i += 1) {
+    const mesh = new THREE.Mesh(shellGeo, shellMat);
+    mesh.castShadow = true;
+    mesh.visible = false;
+    scene.add(mesh);
+    pool.push(mesh);
+  }
+
   /** Throw one, from a point, along a unit direction. */
   function throwFrom(x, y, z, dx, dy, dz) {
-    const mesh = new THREE.Mesh(shellGeo, shellMat);
+    const mesh = pool.find((m) => !m.visible);
+    if (!mesh) return;
     mesh.position.set(x, y, z);
-    mesh.castShadow = true;
-    scene.add(mesh);
+    mesh.rotation.set(0, 0, 0);
+    mesh.visible = true;
     live.push({
       x,
       y,
@@ -35,19 +47,20 @@ export function createGrenades({ scene, world, audio, onBlast }) {
     audio.beep(0.7);
   }
 
+  /** One bang: a flash that grows and fades, the sound, and the match's own blast check. */
   function burst(g) {
-    scene.remove(g.mesh);
+    g.mesh.visible = false;
     const mat = new THREE.MeshBasicMaterial({
       color: 0xffb257,
       transparent: true,
       opacity: 0.85,
       depthWrite: false,
     });
-    const mesh = new THREE.Mesh(flashGeo, mat);
-    mesh.position.set(g.x, g.y, g.z);
-    mesh.scale.setScalar(0.4);
-    scene.add(mesh);
-    flashes.push({ mesh, mat, t: 0, life: 0.34 });
+    const flash = new THREE.Mesh(flashGeo, mat);
+    flash.position.set(g.x, g.y, g.z);
+    flash.scale.setScalar(0.4);
+    scene.add(flash);
+    flashes.push({ mesh: flash, mat, t: 0, life: 0.34 });
     audio.explosion();
     onBlast(g.x, g.y, g.z);
   }
@@ -61,7 +74,7 @@ export function createGrenades({ scene, world, audio, onBlast }) {
       let nz = g.z + g.vz * dt;
 
       if (ny < SHELL) {
-        // A floor bounce keeps most of the speed across the ground and very little of the drop.
+        // A floor bounce keeps the speed across the ground, little of the drop.
         g.y = SHELL;
         g.vy = Math.abs(g.vy) * BOUNCE;
         g.vx *= RUB;
@@ -99,6 +112,7 @@ export function createGrenades({ scene, world, audio, onBlast }) {
       }
     }
 
+    // The flash grows to the blast radius and fades out of the way.
     for (let i = flashes.length - 1; i >= 0; i -= 1) {
       const f = flashes[i];
       f.t += dt;
@@ -113,8 +127,9 @@ export function createGrenades({ scene, world, audio, onBlast }) {
     }
   }
 
+  /** Hide every frag and flash: a new round starts with nothing in the air. */
   function reset() {
-    for (const g of live) scene.remove(g.mesh);
+    for (const g of live) g.mesh.visible = false;
     for (const f of flashes) {
       scene.remove(f.mesh);
       f.mat.dispose();
@@ -123,5 +138,12 @@ export function createGrenades({ scene, world, audio, onBlast }) {
     flashes.length = 0;
   }
 
-  return { throwFrom, step, reset, get live() { return live.length; } };
+  return {
+    throwFrom,
+    step,
+    reset,
+    get live() {
+      return live.length;
+    },
+  };
 }
