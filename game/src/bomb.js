@@ -1,77 +1,98 @@
-// The charge where it was planted: a case, a plate, two wires and a lamp that blinks
-// faster as the fuse runs out. Built once; planting costs a position.
+// The charge, as a thing on the floor: a case, a plate, two wires and a red LED. The main loop shows
+// it whenever the match says the charge is planted and hides it otherwise, so a defusal, a
+// detonation and a round reset all take it off the map without any bookkeeping here.
+//
+// The lamp is the round's clock: its period runs from 1.1 s at the start of the fuse to 0.25 s at the
+// end, and every rise plays a beep that climbs with the urgency.
+
 import * as THREE from 'three';
 
-const FUSE_SECONDS = 30;
+const FUSE_SECONDS = 30;      // the charge's own fuse, for the urgency ramp
+const SLOW_PERIOD = 1.1;
+const FAST_PERIOD = 0.25;
 
 export function createBombModel(scene, audio) {
   const group = new THREE.Group();
+  group.visible = false;
 
-  // Three materials, no textures: a dark case, a machined plate and a red wire.
-  const caseMat = new THREE.MeshStandardMaterial({ color: 0x23282d, roughness: 0.7, metalness: 0.25, emissive: 0x0a0d10 });
-  const plateMat = new THREE.MeshStandardMaterial({ color: 0x3a4249, roughness: 0.5, metalness: 0.5, emissive: 0x10161b });
-  const wireMat = new THREE.MeshStandardMaterial({ color: 0x8d3a2c, roughness: 0.9, emissive: 0x1a0806 });
+  const caseMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, 0.2, 0.28),
+    new THREE.MeshStandardMaterial({ color: '#2b343d', roughness: 0.62, metalness: 0.35 }),
+  );
+  caseMesh.position.y = 0.1;
+  caseMesh.castShadow = true;
+  group.add(caseMesh);
 
-  /** A part of the charge: sized, placed, shadowed and parented. */
-  function part(w, h, d, mat, x, y, z) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    mesh.position.set(x, y, z);
-    mesh.castShadow = true;
-    group.add(mesh);
-    return mesh;
-  }
+  const plate = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 0.03, 0.16),
+    new THREE.MeshStandardMaterial({ color: '#12171c', roughness: 0.5, metalness: 0.6 }),
+  );
+  plate.position.set(0.06, 0.21, 0);
+  group.add(plate);
 
-  part(0.44, 0.16, 0.3, caseMat, 0, 0.08, 0);
-  part(0.3, 0.05, 0.2, plateMat, 0, 0.17, 0);
-  const wireA = part(0.03, 0.03, 0.24, wireMat, 0.1, 0.18, 0);
-  wireA.rotation.y = 0.3;
-  const wireB = part(0.03, 0.03, 0.2, wireMat, -0.1, 0.18, 0.02);
+  const wireMaterial = new THREE.MeshStandardMaterial({ color: '#c8622f', roughness: 0.7, metalness: 0.1 });
+  const wireGeometry = new THREE.BoxGeometry(0.16, 0.012, 0.012);
+  const wireA = new THREE.Mesh(wireGeometry, wireMaterial);
+  wireA.position.set(-0.1, 0.21, 0.06);
+  wireA.rotation.y = 0.5;
+  group.add(wireA);
+  const wireB = new THREE.Mesh(wireGeometry, wireMaterial);
+  wireB.position.set(-0.1, 0.21, -0.06);
   wireB.rotation.y = -0.5;
+  group.add(wireB);
 
-
-  const ledMat = new THREE.MeshStandardMaterial({ color: 0x40100c, emissive: 0xd8321e, emissiveIntensity: 0 });
-  const led = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), ledMat);
-  led.position.set(0.14, 0.19, -0.08);
+  const ledMaterial = new THREE.MeshStandardMaterial({
+    color: '#3a0d0a',
+    emissive: '#ff3b2f',
+    emissiveIntensity: 0.4,
+    roughness: 0.4,
+  });
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), ledMaterial);
+  led.position.set(0.06, 0.24, 0);
   group.add(led);
 
-  const lamp = new THREE.PointLight(0xff3a22, 0, 3.2, 2);
-  lamp.position.set(0, 0.28, 0);
-  group.add(lamp);
+  const glow = new THREE.PointLight('#ff3b2f', 0, 3.2, 2);
+  glow.position.set(0.06, 0.34, 0);
+  group.add(glow);
 
-  group.visible = false;
   scene.add(group);
 
-  let elapsed = 0;
-  let litLastTick = false;
+  let phase = 0;       // seconds into the current lamp period
+  let rising = false;
+  let urgency = 0;
 
-  /** Put the charge down, turned to a fresh angle so two plants never look alike. */
   function show(x, z) {
-    group.position.set(x, 0.01, z);
-    group.rotation.y = Math.random() * Math.PI * 2;
+    group.position.set(x, 0, z);
     group.visible = true;
-    elapsed = 0;
-    litLastTick = false;
+    phase = 0;
+    rising = false;
+    urgency = 0;
   }
 
   function hide() {
     group.visible = false;
-    ledMat.emissiveIntensity = 0;
-    lamp.intensity = 0;
+    glow.intensity = 0;
+    ledMaterial.emissiveIntensity = 0.4;
   }
 
-  /** `fuse` is the seconds left, so the lamp speeds up as the round runs out. */
+  /** dt in seconds, fuse the seconds left on the charge. */
   function tick(dt, fuse) {
     if (!group.visible) return;
-    elapsed += dt;
-    // 0 at the start of the fuse, 1 when it is out: the lamp and beep ride it.
-    const urgency = 1 - Math.min(1, Math.max(0, fuse) / FUSE_SECONDS);
-    const period = 1.1 - urgency * 0.85; // 1.1 s apart at the start, 0.25 s at the end
-    const lit = elapsed % period < period * 0.45;
-    ledMat.emissiveIntensity = lit ? 2.2 : 0;
-    lamp.intensity = lit ? 2.6 : 0;
-    // One beep per blink: the rising edge, not every frame the lamp is on.
-    if (lit && !litLastTick) audio.beep(1.6 + urgency * 0.8);
-    litLastTick = lit;
+    urgency = 1 - Math.max(0, Math.min(1, fuse / FUSE_SECONDS));
+    const period = SLOW_PERIOD + (FAST_PERIOD - SLOW_PERIOD) * urgency;
+
+    phase += dt;
+    if (phase >= period) {
+      phase -= period;
+      rising = true;
+      if (audio) audio.beep(1.6 + urgency * 0.8);
+    }
+
+    // A short rise and a longer fall: a lamp, not a sine wave.
+    const rise = Math.min(1, phase / (period * 0.18));
+    const level = rising && phase < period * 0.3 ? rise : Math.max(0, 1 - phase / (period * 0.55));
+    ledMaterial.emissiveIntensity = 0.35 + level * 3.1;
+    glow.intensity = level * (0.6 + urgency * 1.6);
   }
 
   return { show, hide, tick, group };

@@ -16,7 +16,6 @@ const MAX_PATH_AGE = 2.5;
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Y = new THREE.Vector3(0, 1, 0);
 
-/** A* over the world's navigation lattice. Returns world-space waypoints, or null. */
 export function findPath(world, from, to) {
   const nav = world.nav;
   const start = nav.at(from.x, from.z);
@@ -32,7 +31,6 @@ export function findPath(world, from, to) {
   const heuristic = (a, b) => Math.hypot(nodes[a].x - nodes[b].x, nodes[a].z - nodes[b].z);
 
   while (open.length) {
-    // The lattice is small enough that a linear pick beats the bookkeeping of a heap.
     let bestIndex = 0;
     for (let i = 1; i < open.length; i += 1) if (open[i].f < open[bestIndex].f) bestIndex = i;
     const current = open.splice(bestIndex, 1)[0];
@@ -62,7 +60,6 @@ export function findPath(world, from, to) {
   return null;
 }
 
-/** Drop every waypoint the bot can already see past, so paths are lines and not staircases. */
 function smooth(world, path) {
   if (path.length < 3) return path;
   const out = [path[0]];
@@ -88,7 +85,6 @@ export function clearLine(world, a, b) {
   return true;
 }
 
-/** The visible model: a vest, a helmet, a rifle. Cheap, and readable at 40 m. */
 function buildMesh(team, name) {
   const group = new THREE.Group();
   const hue = team === 'dock' ? 'dock' : 'warden';
@@ -114,7 +110,6 @@ function buildMesh(team, name) {
   const legs = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 0.5, 4, 8), cloth);
   legs.position.y = 0.44;
 
-  // The rifle points down -Z, which is where the body looks.
   const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.86), gear);
   rifle.position.set(0.17, 1.16, -0.34);
   const arms = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.3), cloth);
@@ -126,7 +121,6 @@ function buildMesh(team, name) {
     group.add(part);
   }
 
-  // A thin team ring at the feet, the only UI the world itself carries.
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(0.3, 0.42, 16),
     new THREE.MeshBasicMaterial({
@@ -140,8 +134,6 @@ function buildMesh(team, name) {
   ring.position.y = 0.03;
   group.add(ring);
 
-  // The gun in the hands is the gun in the state: a pistol is short, the long rifle runs past the
-  // shoulder. One box, resized, so the silhouette still tells you what you are facing at 40 m.
   const GUN_SHAPE = {
     tally: [0.7, 0.72, 0.34, 0.24, 1.1, -0.26],
     skiff: [0.9, 0.95, 0.62, 0.18, 1.15, -0.3],
@@ -247,7 +239,6 @@ export function createBot(scene, world, options) {
     const distance = toTarget.length();
     if (distance > SIGHT_RANGE) return false;
     toTarget.normalize();
-    // Field of view, but a bot that has just been shot at looks wider than its cone.
     const forwardX = -Math.sin(body.state.yaw);
     const forwardZ = -Math.cos(body.state.yaw);
     const dot = forwardX * toTarget.x + forwardZ * toTarget.z;
@@ -274,7 +265,6 @@ export function createBot(scene, world, options) {
   }
 
 
-  /** Head straight for a point; returns true when it is close enough to stand on. */
   function goTo(destination, dt) {
     const dx = destination.x - body.state.position.x;
     const dz = destination.z - body.state.position.z;
@@ -292,11 +282,6 @@ export function createBot(scene, world, options) {
     return false;
   }
 
-  /**
-   * Get to a point. A clear line is walked directly; anything behind a building goes through the
-   * navigation lattice, one node at a time, so a defender can walk around the warehouse instead
-   * of leaning on its north wall for the whole round.
-   */
   function travel(destination, dt) {
     const pos = body.state.position;
     const straight = Math.hypot(destination.x - pos.x, destination.z - pos.z);
@@ -339,7 +324,6 @@ export function createBot(scene, world, options) {
     bot.moveDir = null;
   }
 
-  /** Point the body at a world position with a skill-scaled wobble. */
   function aimAt(point, dt, ctx) {
     const ex = body.state.position.x;
     const ez = body.state.position.z;
@@ -365,7 +349,6 @@ export function createBot(scene, world, options) {
     if (!cone) return;
     const eyePos = body.eyePosition(shotEye);
     const dir = shotDir.set(point.x - eyePos.x, point.y - eyePos.y, point.z - eyePos.z).normalize();
-    // Its own aim error: tight up close, loose across the yard, worse for a poor shot.
     const reachSpread = 0.004 + reach * 0.0006 * (1.8 - bot.skill);
     const roll = ctx.random() * Math.PI * 2;
     const radius = Math.sqrt(ctx.random()) * reachSpread;
@@ -392,20 +375,14 @@ export function createBot(scene, world, options) {
     ctx.onDamage(victim, result.damage, headshot, bot);
   }
 
-  /**
-   * One fixed tick. `ctx` carries everything the bot is allowed to know about the round:
-   * the actors, the bomb, the sites, the clock and the callbacks that change the world.
-   */
   const EMPTY_KEYS = new Set();
 
-  /** Turn the bot's wish into the keys the shared movement code reads, then move the body. */
   function integrate(dt) {
     const keys = new Set();
     if (bot.moveDir && !Number.isFinite(bot.moveDir.x + bot.moveDir.z)) bot.moveDir = null;
     if (bot.moveDir) {
       const sin = Math.sin(body.state.yaw);
       const cos = Math.cos(body.state.yaw);
-      // yaw 0 looks down -Z, right is +X (player.js): project the wish onto that frame.
       const fwd = -sin * bot.moveDir.x - cos * bot.moveDir.z;
       const right = cos * bot.moveDir.x - sin * bot.moveDir.z;
       if (fwd > 0.25) keys.add('KeyW');
@@ -413,15 +390,12 @@ export function createBot(scene, world, options) {
       if (right > 0.25) keys.add('KeyD');
       else if (right < -0.25) keys.add('KeyA');
     }
-    // CS habits: go quiet near the enemy, and crouch to tighten the spray.
     if (bot.wantWalk) keys.add('ShiftLeft');
     if (bot.wantCrouch) keys.add('KeyC');
     body.step(dt, keys.size ? keys : EMPTY_KEYS);
   }
 
   function unstick(dt) {
-    // A body that wants to move but barely does is pushing a wall: slide along it instead of
-    // leaning on it for the rest of the round.
     bot.watchT += dt;
     if (bot.watchT >= 0.7) {
       const moved = Math.hypot(body.state.position.x - bot.watchX, body.state.position.z - bot.watchZ);
@@ -445,7 +419,6 @@ export function createBot(scene, world, options) {
 
   function step(dt, ctx) {
     if (!bot.alive) return;
-    // If the body ends up inside a wall (spawn overlap, a shove), put it back on the lattice.
     const here = body.state.position;
     if (world.blockedAt(here.x, here.z, 0.42)) {
       const id = world.nav.at(here.x, here.z);
@@ -473,8 +446,6 @@ export function createBot(scene, world, options) {
 
     if (weapon.state.mag === 0 && weapon.state.reloading <= 0) weapon.beginReload();
 
-    // Perception runs a few times a second, not every tick: a bot that re-decides at 60 Hz
-    // reads as a machine, and it is wasted work.
     if (bot.thinkTimer <= 0) {
       bot.thinkTimer = 0.12 + (1 - bot.skill) * 0.1;
       const seen = visibleEnemies(ctx);
@@ -493,14 +464,12 @@ export function createBot(scene, world, options) {
 
     if (bot.reaction > 0) bot.reaction -= dt;
 
-    // Freeze time: everyone stands at their spawn and waits for the whistle.
     if (ctx.phase && ctx.phase !== 'live') {
       stopMoving();
       bot.state = 'ready';
       return;
     }
 
-    // Soldier habits (the CS 1.6 ones)
     bot.wantWalk = false;
     bot.wantCrouch = false;
     if (bot.wantRetreat) {
@@ -511,7 +480,6 @@ export function createBot(scene, world, options) {
     if (recentSighting) bot.wantWalk = true; // do not sprint into a fight you already heard
     bot.retreating = bot.retreatUntil > ctx.time;
     if (bot.retreating) {
-      // Hurt badly: give ground, but keep the rifle up — turning your back is how you die.
       bot.state = 'retreat';
       const away = bot.lastSeen ?? {
         x: body.state.position.x + Math.sin(body.state.yaw) * 4,
@@ -525,22 +493,17 @@ export function createBot(scene, world, options) {
       if (!bot.target || !bot.target.alive) return; // nothing to shoot at: just leave
     }
 
-    // Combat
     if (bot.target && bot.target.alive) {
       const targetEye = bot.target.eyePosition
         ? bot.target.eyePosition(otherEye)
         : otherEye.set(bot.target.body.state.position.x, bot.target.body.state.position.y + 1.2, bot.target.body.state.position.z);
-      // Aim at the chest, and let the cone do the rest; better bots lead higher.
       aimPoint.copy(targetEye);
       aimPoint.y -= 0.46 - bot.skill * 0.12;
       aimAt(aimPoint, dt, ctx);
 
-      // Positioning: walk the fight into range, give ground when someone is in your face, and
-      // shuffle sideways between bursts. Standing still to trade shots is a duelling rule.
       const tpos = bot.target.body.state.position;
       const gap = Math.hypot(tpos.x - body.state.position.x, tpos.z - body.state.position.z) || 1;
       if (bot.retreating) {
-        // Keep the retreat vector, keep aiming, keep firing.
         bot.wantCrouch = false;
       } else {
       stopMoving();
@@ -548,25 +511,19 @@ export function createBot(scene, world, options) {
         bot.strafeTimer = 0.4 + ctx.random() * 0.7;
         bot.strafe *= -1;
       }
-      // A crouched rifle is a steadier rifle; a reloading one is a reason to step back.
       if (gap > 9 && bot.skill > 0.4 && weapon.state.mag > 0) bot.wantCrouch = true;
       if (weapon.state.reloading > 0 || weapon.state.mag === 0) {
         bot.moveDir = { x: -(tpos.x - body.state.position.x) / gap, z: -(tpos.z - body.state.position.z) / gap };
       } else if (gap > 24) {
-        // Out of useful range: close the distance, and do not waste the magazine doing it.
         bot.moveDir = { x: (tpos.x - body.state.position.x) / gap, z: (tpos.z - body.state.position.z) / gap };
       } else if (gap < 6.5) {
-        // Muzzle to muzzle: take a step back so the rifle has room.
         bot.moveDir = { x: -(tpos.x - body.state.position.x) / gap, z: -(tpos.z - body.state.position.z) / gap };
       } else if (weapon.state.cooldown > 0.02 && bot.skill > 0.4) {
-        // Shuffle sideways between bursts, in the body's own frame.
         const side = bot.strafe * (0.35 + bot.skill * 0.4);
         bot.moveDir = { x: Math.cos(body.state.yaw) * side, z: -Math.sin(body.state.yaw) * side };
       }
       }
 
-      // A planted charge outranks the duel: keep the sights on the target, but walk the fight to
-      // the bomb instead of trading shots from across the room while the fuse burns.
       if (ctx.bomb && ctx.bomb.state === 'planted') {
         const toBomb = Math.hypot(ctx.bomb.x - body.state.position.x, ctx.bomb.z - body.state.position.z);
         if (toBomb > 2.2) {
@@ -596,7 +553,6 @@ export function createBot(scene, world, options) {
 
     if (bot.burstCooldown > 0) bot.burstCooldown -= dt;
     if (bot.burst > 0 && weapon.state.mag > 0) {
-      // Finish the burst at the last known position, the way a person would.
       if (bot.lastSeen) {
         aimAt(bot.lastSeen, dt, ctx);
         if (bot.aimError < 0.08) shoot(ctx, bot.lastSeen);
@@ -604,8 +560,6 @@ export function createBot(scene, world, options) {
       bot.burst -= 1;
     }
 
-    // A frag into the last place an enemy was seen: the answer to a corner you cannot look into,
-    // and the reason a bot that vanishes behind cover is not automatically safe.
     if (bot.frags > 0 && !bot.target && bot.lastSeen && ctx.throwFrag) {
       const age = ctx.time - bot.lastSeenAt;
       const dx = bot.lastSeen.x - body.state.position.x;
@@ -619,7 +573,6 @@ export function createBot(scene, world, options) {
       }
     }
 
-    // Objective
     const bomb = ctx.bomb;
     if (bomb && bomb.state === 'planted') {
       if (bot.team === 'warden') {
@@ -640,13 +593,10 @@ export function createBot(scene, world, options) {
         if (bot.defuseTimer > 6.5) ctx.onDefused?.(bot);
         return;
       }
-      // Attackers hold the site they just took.
       const hold = ctx.holdPoint ?? { x: bomb.x + 4, z: bomb.z + 5 };
       if (!travel(hold, dt)) {
-        // still walking to the post
       } else {
         stopMoving();
-        // Watch the most likely entrance.
         const watch = ctx.watchPoint ?? { x: bomb.x, z: bomb.z + 14 };
         const desiredYaw = Math.atan2(-(watch.x - body.state.position.x), -(watch.z - body.state.position.z));
         let delta = desiredYaw - body.state.yaw;
@@ -659,7 +609,6 @@ export function createBot(scene, world, options) {
       return;
     }
 
-    // Carrying the charge: go to the assigned site and plant.
     if (bot.hasBomb && ctx.site) {
       const site = ctx.site;
       const near = Math.hypot(body.state.position.x - site.x, body.state.position.z - site.z) < site.radius - 1;
@@ -681,8 +630,6 @@ export function createBot(scene, world, options) {
       return;
     }
 
-    // Movement
-    // A CS bot does not sprint out of spawn alone: it lets the squad form, then pushes.
     if (ctx.attacking && ctx.liveAge !== undefined && ctx.liveAge < bot.pushDelay) {
       stopMoving();
       bot.state = 'stage';
@@ -695,7 +642,6 @@ export function createBot(scene, world, options) {
     if (arrived) {
       stopMoving();
       bot.state = 'hold';
-      // Scan a held angle rather than stare through it.
       if (bot.strafeTimer <= 0) {
         bot.strafeTimer = 1.2 + ctx.random() * 2.2;
         bot.strafe *= -1;
@@ -715,9 +661,7 @@ export function createBot(scene, world, options) {
       if (attacker) attacker.kills = (attacker.kills ?? 0) + 1;
       return true;
     }
-    // Below a third of your health a CS bot disengages; so does this one.
     if (bot.health < 35 && bot.health + amount >= 35) bot.wantRetreat = true;
-    // Being hit turns the body around even if it saw nothing.
     if (attacker?.body) {
       const dx = attacker.body.state.position.x - body.state.position.x;
       const dz = attacker.body.state.position.z - body.state.position.z;
@@ -735,7 +679,6 @@ export function createBot(scene, world, options) {
     model.group.rotation.y = s.yaw;
     model.group.updateMatrixWorld(true);
     if (!bot.alive) {
-      // A body goes down: it tips over on its side, bounces once and settles.
       bot.deathT = Math.min(2, (bot.deathT ?? 0) + dt);
       const fall = Math.min(1, bot.deathT / 0.55);
       const eased = 1 - (1 - fall) * (1 - fall);
@@ -747,7 +690,6 @@ export function createBot(scene, world, options) {
       return;
     }
     bot.deathT = 0;
-    // Crouch squashes the model.
     const squash = 1 - s.crouch * 0.28;
     model.group.scale.set(1, squash, 1);
   }
@@ -781,13 +723,9 @@ export function createBot(scene, world, options) {
     syncModel();
   }
 
-  // Deterministic roll direction, so a body always falls the same way for the same bot.
   bot.deathSide = name.length % 2 === 0 ? 1 : -1;
-  // Staggered so the squad leaves spawn in a trickle, not a stampede.
   bot.pushDelay = 1.6 + (options.index ?? 0) * 0.45;
   syncModel();
-  // The same object the closure mutates: a copy would freeze alive, health, path and hasBomb
-  // at their spawn values for whoever holds the reference.
   return Object.assign(bot, {
     body,
     model,

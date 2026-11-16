@@ -1,79 +1,92 @@
-// The buy menu: a grid of real buttons, one per purchase, rebuilt from the weapon table on every
-// open. It lives apart from the HUD so the HUD keeps to the readouts and this file to the shop.
-const $ = (id) => document.getElementById(id);
+// The shop, as DOM. hud.js owns the vitals and the feed; this owns the buy menu only: the six rows
+// (four guns, the vest, the frag), what each costs, and which ones the wallet cannot reach right
+// now. Buying itself is the keyboard's job in main.js — this module never decides anything, it
+// renders the state it is handed.
+
+import { ARMOUR, GRENADE } from './weapons.js';
 
 export function createBuyMenu() {
-  const panel = $('buy');
-  const grid = $('buy-grid');
-  const moneyEl = $('buy-money');
-  const hintEl = $('buy-hint');
+  const panel = document.getElementById('buy');
+  const moneyLabel = document.getElementById('buy-money');
+  const grid = document.getElementById('buy-grid');
+  const hintLine = document.getElementById('buy-hint');
 
-  /** One row of the grid: key, name, slot, numbers, price. */
-  function row({ id, key, name, slot, stat, price, disabled }) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'buy-item';
-    button.dataset.weapon = id;
-    button.disabled = disabled;
-    button.innerHTML = `
-        <span class="buy-key">${key}</span>
-        <span class="buy-name">${name}</span>
-        <span class="buy-slot">${slot}</span>
-        <span class="buy-stat">${stat}</span>
-        <span class="buy-price">${price}</span>`;
-    grid.appendChild(button);
+  function row(key, name, slot, stat, price, owned, affordable) {
+    const item = document.createElement('div');
+    item.className = 'buy-item';
+    item.dataset.key = key;
+    if (!affordable || owned) item.setAttribute('aria-disabled', 'true');
+
+    const keyTag = document.createElement('span');
+    keyTag.className = 'buy-key';
+    keyTag.textContent = key;
+    item.appendChild(keyTag);
+
+    const nameTag = document.createElement('span');
+    nameTag.className = 'buy-name';
+    nameTag.textContent = name;
+    item.appendChild(nameTag);
+
+    const slotTag = document.createElement('span');
+    slotTag.className = 'buy-slot';
+    slotTag.textContent = slot;
+    item.appendChild(slotTag);
+
+    const statTag = document.createElement('span');
+    statTag.className = 'buy-stat';
+    statTag.textContent = stat;
+    item.appendChild(statTag);
+
+    const priceTag = document.createElement('span');
+    priceTag.className = 'buy-price';
+    priceTag.textContent = owned ? owned : `$${price}`;
+    item.appendChild(priceTag);
+
+    return item;
   }
 
-  /** Open the shop: guns, vest, frag, each greyed out when it is out of reach. */
-  function show(weapons, money, armourOwned, fragOwned = 0) {
-    grid.innerHTML = '';
-    for (const w of weapons) {
-      row({
-        id: w.id,
-        key: w.key,
-        name: w.name,
-        slot: w.slot === 'primary' ? 'Primary' : 'Sidearm',
-        stat: `${w.damage} dmg · ${Math.round(60 / w.rate)} rpm`,
-        price: w.price === 0 ? 'Free' : `$${w.price.toLocaleString('en-US')}`,
-        disabled: money < w.price,
-      });
+  function setMoney(amount) {
+    if (moneyLabel) moneyLabel.textContent = `$${amount}`;
+  }
+
+  /** show(weapons, money, armourOwned, fragOwned): the four guns come from main.js's BUY_LIST. */
+  function show(weapons, money, armourOwned = 0, fragOwned = 0) {
+    if (!panel || !grid) return;
+    setMoney(money);
+    grid.textContent = '';
+
+    for (const weapon of weapons) {
+      const stat = `${weapon.dmg} dmg · ${weapon.mag}/${weapon.reserve}`;
+      grid.appendChild(
+        row(weapon.key, weapon.name, weapon.slot, stat, weapon.price, '', money >= weapon.price),
+      );
     }
-    row({
-      id: 'bastion',
-      key: '5',
-      name: 'Bastion',
-      slot: 'Armour',
-      stat: '100 points · absorbs body shots',
-      price: '$650',
-      disabled: money < 650 || armourOwned >= 100,
-    });
-    row({
-      id: 'frag',
-      key: '6',
-      name: 'Frag',
-      slot: 'Gear',
-      stat: '118 blast · 5 m · thrown on G',
-      price: '$300',
-      disabled: money < 300 || fragOwned >= 1,
-    });
+
+    const vestText = armourOwned > 0 ? `${armourOwned} worn` : '';
+    grid.appendChild(
+      row('5', ARMOUR.name, 'armour', `${ARMOUR.points} points`, ARMOUR.price, vestText,
+        money >= ARMOUR.price && armourOwned < ARMOUR.points),
+    );
+
+    const fragText = fragOwned > 0 ? `${fragOwned} carried` : '';
+    grid.appendChild(
+      row('6', GRENADE.name, 'grenade', `${GRENADE.damage} dmg · ${GRENADE.radius} m`, GRENADE.price,
+        fragText, money >= GRENADE.price && fragOwned < GRENADE.max),
+    );
+
     panel.hidden = false;
   }
 
   function hide() {
-    panel.hidden = true;
+    if (panel) panel.hidden = true;
   }
 
-  /** The balance, printed inside the shop too. */
-  function setMoney(amount) {
-    if (moneyEl) moneyEl.textContent = `$${Math.round(amount).toLocaleString('en-US')}`;
-  }
-
-  /** One line under the grid: what the last attempt did. */
   function hint(text, tone = '') {
-    if (!hintEl) return;
-    hintEl.textContent = text ?? '';
-    hintEl.dataset.tone = tone;
+    if (!hintLine) return;
+    hintLine.textContent = text;
+    if (tone) hintLine.dataset.tone = tone;
+    else delete hintLine.dataset.tone;
   }
 
-  return { show, hide, setMoney, hint, grid };
+  return { setMoney, show, hide, hint };
 }

@@ -1,429 +1,457 @@
-// BREAKWATER — a container terminal at dusk. Every solid thing is a box, because a box is honest:
-// it collides, it occludes and it reads at a glance. Two objectives sit north of mid, one in the
-// warehouse (A) and one in the stacks (B); attackers enter from the south gate and every route
-// funnels through mid. This module owns the geometry, the colliders, the shootables, the spawns,
-// the objectives and the navigation lattice.
+// The map: a dockside yard at dusk, two bomb sites, and everything the rest of the game asks of the
+// world — the boxes a body may not walk through, the meshes a bullet stops at, the spawns, the
+// sites, and the navigation lattice the bots path over.
+//
+// Every visual is a box, a cylinder or a plane. One thing here is load-bearing and was paid for in
+// a lost day: group.updateMatrixWorld(true) before returning. The ground and the painted lines are
+// planes rotated flat, and until their matrix is baked a raycast sees the floor standing upright at
+// the origin — an invisible wall across the middle of the map that blocks sight from one side only.
 
 import * as THREE from 'three';
 import { PALETTE, rgb } from './palette.js';
 
-const BOUNDS = { minX: -30, maxX: 30, minZ: -32, maxZ: 32 };
-const BOT_RADIUS = 0.42;
+export const BOT_RADIUS = 0.42;
+const WALK_BAND_LOW = 0.32;    // anything shorter than this is walkable, for bots and player alike
+const WALK_BAND_HIGH = 1.7;    // anything taller than this is over a body's head
+const NAV_SPACING = 2.5;
+const NAV_INSET = 1.2;
 
-/** Every surface family gets one material and keeps it. */
-function surfaceMaterials() {
+export function createWorld(scene) {
+  const group = new THREE.Group();
+  const colliders = [];
+  const shootables = [];
+  const bounds = { minX: -30, maxX: 30, minZ: -32, maxZ: 32 };
+
+  // rgb() hands back plain channels; a material wants a THREE.Color, and anything else silently
+  // renders white — which is exactly how the first pass turned a dusk yard into a snowfield.
   const tint = (name, k) => {
     const c = rgb(name, k);
     return new THREE.Color(c.r, c.g, c.b);
   };
-  const metal = (name) => (name === 'steel' || name === 'rust' ? 0.45 : 0.05);
-  const make = (name, k, roughness = 0.9) =>
-    new THREE.MeshStandardMaterial({
-      color: tint(name, k),
-      roughness,
-      metalness: metal(name),
-    });
-  const glow = new THREE.MeshStandardMaterial({
-    color: tint('accent'),
-    emissive: tint('accent', 0.55),
-    roughness: 0.4,
-  });
-  return {
-    asphalt: make('canvas', 1.95),
-    concrete: make('concrete', 1.1),
-    wall: make('concrete', 0.92),
-    steel: make('steel', 1.0, 0.5),
-    rust: make('rust', 1.05, 0.55),
-    crate: make('rust', 1.35),
-    surface: make('surface', 1.2),
-    hairline: make('hairline', 1.4),
-    dock: make('dock', 1.0, 0.7),
-    warden: make('warden', 1.0, 0.7),
-    accent: glow,
+
+  const materials = {
+    asphalt: new THREE.MeshStandardMaterial({ color: tint('canvas', 0.5), roughness: 0.94, metalness: 0.02 }),
+    concrete: new THREE.MeshStandardMaterial({ color: tint('concrete', 0.45), roughness: 0.86, metalness: 0.03 }),
+    wall: new THREE.MeshStandardMaterial({ color: tint('surface', 0.5), roughness: 0.78, metalness: 0.12 }),
+    steel: new THREE.MeshStandardMaterial({ color: tint('steel', 0.45), roughness: 0.44, metalness: 0.4 }),
+    rust: new THREE.MeshStandardMaterial({ color: tint('rust', 0.55), roughness: 0.82, metalness: 0.18 }),
+    crate: new THREE.MeshStandardMaterial({ color: tint('rust', 0.5), roughness: 0.88, metalness: 0.06 }),
+    dockPaint: new THREE.MeshBasicMaterial({ color: PALETTE.dock, transparent: true, opacity: 0.16 }),
+    wardenPaint: new THREE.MeshBasicMaterial({ color: PALETTE.warden, transparent: true, opacity: 0.16 }),
+    line: new THREE.MeshBasicMaterial({ color: PALETTE.accent, transparent: true, opacity: 0.14 }),
   };
-}
 
-export function createWorld(scene) {
-  const mats = surfaceMaterials();
-  const colliders = [];
-  const shootables = [];
-  const group = new THREE.Group();
-  scene.add(group);
+  // ---------------------------------------------------------------- geometry helpers
 
-  const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-  const cylinderGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12);
-
-  /** One solid volume: mesh, collider and shootable. `solid: false` stops nothing. */
-  function solid(x, y, z, w, h, d, mat, opts = {}) {
-    const mesh = new THREE.Mesh(opts.round ? cylinderGeo : boxGeo, mat);
+  /**
+   * One box of world. `opts.solid === false` leaves it out of the collider list, `opts.shootable
+   * === false` out of the shootable list, and `opts.round` swaps the box for a cylinder.
+   */
+  function block(x, y, z, w, h, d, material, opts = {}) {
+    let mesh;
+    if (opts.round) {
+      mesh = new THREE.Mesh(new THREE.CylinderGeometry(w / 2, w / 2, h, 14), material);
+    } else {
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    }
     mesh.position.set(x, y + h / 2, z);
-    mesh.scale.set(w, h, d);
-    mesh.castShadow = opts.cast !== false;
+    mesh.castShadow = opts.shadow !== false;
     mesh.receiveShadow = true;
     group.add(mesh);
-    if (opts.shootable !== false) shootables.push(mesh);
+
     if (opts.solid !== false) {
-      colliders.push({
-        minX: x - w / 2,
-        maxX: x + w / 2,
-        minY: y,
-        maxY: y + h,
-        minZ: z - d / 2,
-        maxZ: z + d / 2,
-        tag: opts.tag ?? 'wall',
-      });
+      const collider = {
+        minX: x - w / 2, maxX: x + w / 2,
+        minY: y, maxY: y + h,
+        minZ: z - d / 2, maxZ: z + d / 2,
+      };
+      colliders.push(collider);
+      if (opts.actor) collider.actor = opts.actor;
     }
+    if (opts.shootable !== false) shootables.push(mesh);
     return mesh;
   }
 
-  // The apron: one plane, and it takes bullets, so a missed shot still raises dust.
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), mats.asphalt);
+  function paint(x, z, w, d, material) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), material);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(x, 0.015, z);
+    group.add(mesh);
+    return mesh;
+  }
+
+  // ---------------------------------------------------------------- ground and sky
+
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(140, 140), materials.asphalt);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   group.add(ground);
   shootables.push(ground);
 
-  // Painted lane lines: they stop nothing and give the eye a ruler.
-  for (let i = -3; i <= 3; i += 1) {
-    const line = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 64), mats.hairline);
-    line.rotation.x = -Math.PI / 2;
-    line.position.set(i * 8.5, 0.012, 0);
-    group.add(line);
-  }
+  // A dusk dome: one canvas, one vertical gradient, wrapped on the inside of a big sphere. It gives
+  // the yard a horizon instead of a flat background colour, and a texture sidesteps the colour-space
+  // trap a hand-written shader falls into (its output skips the renderer's conversion and comes out
+  // wrong on screen).
+  const skyCanvas = document.createElement('canvas');
+  skyCanvas.width = 4;
+  skyCanvas.height = 256;
+  const skyCtx = skyCanvas.getContext('2d');
+  const skyGradient = skyCtx.createLinearGradient(0, 256, 0, 0);
+  skyGradient.addColorStop(0, '#a9793f');
+  skyGradient.addColorStop(0.42, '#46606f');
+  skyGradient.addColorStop(1, '#1b2a38');
+  skyCtx.fillStyle = skyGradient;
+  skyCtx.fillRect(0, 0, 4, 256);
+  const skyTexture = new THREE.CanvasTexture(skyCanvas);
+  skyTexture.colorSpace = THREE.SRGBColorSpace;
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(150, 24, 16),
+    new THREE.MeshBasicMaterial({ map: skyTexture, side: THREE.BackSide, depthWrite: false, fog: false, toneMapped: false }),
+  );
+  dome.position.y = -6;
+  group.add(dome);
 
+  // ---------------------------------------------------------------- lighting
+
+  const hemisphere = new THREE.HemisphereLight(0xa8c4d8, 0x5a5145, 1.5);
+  group.add(hemisphere);
+
+  const sun = new THREE.DirectionalLight(0xffe0b8, 1.5);
+  sun.position.set(-38, 46, 28);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -46;
+  sun.shadow.camera.right = 46;
+  sun.shadow.camera.top = 46;
+  sun.shadow.camera.bottom = -46;
+  sun.shadow.camera.far = 160;
+  sun.shadow.bias = -0.0006;
+  group.add(sun);
+
+  // A flat fill so the shadowed faces are not black, the one thing that made the first pass a night.
+  group.add(new THREE.AmbientLight(0xdfe8f2, 0.85));
+
+  // ---------------------------------------------------------------- perimeter
 
   const WALL_H = 6.5;
-  solid(0, 0, BOUNDS.minZ - 0.6, 62, WALL_H, 1.2, mats.wall);
-  solid(0, 0, BOUNDS.maxZ + 0.6, 62, WALL_H, 1.2, mats.wall);
-  solid(BOUNDS.minX - 0.6, 0, 0, 1.2, WALL_H, 66, mats.wall);
-  solid(BOUNDS.maxX + 0.6, 0, 0, 1.2, WALL_H, 66, mats.wall);
+  const WALL_T = 0.6;
+  const spanX = bounds.maxX - bounds.minX;
+  const spanZ = bounds.maxZ - bounds.minZ;
+  block(0, 0, bounds.minZ, spanX + WALL_T, WALL_H, WALL_T, materials.wall);
+  block(0, 0, bounds.maxZ, spanX + WALL_T, WALL_H, WALL_T, materials.wall);
+  block(bounds.minX, 0, 0, WALL_T, WALL_H, spanZ, materials.wall);
+  block(bounds.maxX, 0, 0, WALL_T, WALL_H, spanZ, materials.wall);
 
-  // Warehouse, objective A (west): four walls, a south doorway, an east bay.
-  const wx = -17;
-  solid(wx - 6.5, 0, -21, 7, 5.4, 0.9, mats.wall); // north wall, west of the back door
-  solid(wx + 6.5, 0, -21, 7, 5.4, 0.9, mats.wall); // north wall, east of the back door
-  solid(wx, 3.9, -21, 6, 1.5, 0.9, mats.wall); // header over the back door
-  solid(wx - 10.4, 0, -11, 0.9, 5.4, 20, mats.wall); // west wall
-  solid(wx + 10.4, 0, -11, 0.9, 5.4, 20, mats.wall); // east wall, with the bay cut below
-  solid(wx - 6.5, 0, -1, 7, 5.4, 0.9, mats.wall); // south wall, west of the doorway
-  solid(wx + 6.5, 0, -1, 7, 5.4, 0.9, mats.wall); // south wall, east of the doorway
-  solid(wx, 3.9, -1, 6, 1.5, 0.9, mats.wall); // header over the doorway
-  // Roof and trusses: the interior is a room, not a pen.
-  solid(wx, 5.4, -11, 21, 0.5, 21, mats.concrete, { solid: false, cast: true });
+  // ---------------------------------------------------------------- site A: the warehouse
+
+  const WARE_X = -17;
+  const WARE_Z = -11;
+  const WARE_HALF = 10.5;          // 21 m square
+  const WARE_H = 4.6;
+  const northZ = WARE_Z - WARE_HALF;   // the back, away from both spawns
+  const southZ = WARE_Z + WARE_HALF;   // faces the middle of the yard
+
+  // Back wall, split by the 6 m back door with a header over it.
+  block(WARE_X - 7, 0, northZ, 7, WARE_H, 0.5, materials.wall);
+  block(WARE_X + 7, 0, northZ, 7, WARE_H, 0.5, materials.wall);
+  block(WARE_X, 2.6, northZ, 6, WARE_H - 2.6, 0.5, materials.wall);
+
+  // Front wall, split by a 6 m doorway at its centre.
+  block(WARE_X - 7.25, 0, southZ, 6.5, WARE_H, 0.5, materials.wall);
+  block(WARE_X + 7.25, 0, southZ, 6.5, WARE_H, 0.5, materials.wall);
+  block(WARE_X, 2.6, southZ, 6, WARE_H - 2.6, 0.5, materials.wall);
+
+  // Solid sides.
+  block(WARE_X - WARE_HALF, 0, WARE_Z, 0.5, WARE_H, 21, materials.wall);
+  block(WARE_X + WARE_HALF, 0, WARE_Z, 0.5, WARE_H, 21, materials.wall);
+
+  // Roof: decorative, so it never blocks a shot or a body.
+  block(WARE_X, 5.4, WARE_Z, 21.6, 0.3, 21.6, materials.steel, { solid: false, shootable: false });
   for (let i = -2; i <= 2; i += 1) {
-    solid(wx + i * 4.6, 4.6, -11, 0.35, 0.8, 20, mats.steel, { solid: false });
+    block(WARE_X + i * 4, 4.9, WARE_Z, 0.24, 0.5, 21, materials.steel, { solid: false, shootable: false });
   }
-  // Interior cover: two crate walls that make the objective defensible.
-  solid(wx - 5.5, 0, -9, 1.6, 1.6, 6.5, mats.crate);
-  solid(wx + 5.5, 0, -14, 1.6, 1.6, 5.5, mats.crate);
-  solid(wx - 1.5, 0, -18.5, 3.4, 1.6, 1.6, mats.crate);
-  solid(wx + 2.5, 1.6, -18.5, 1.6, 1.6, 1.6, mats.crate);
 
-  // Container yard, objective B (east). A stack is one call: 2.6 m tiers, top in the
-  // material so silhouettes differ.
-  const bx = 17;
-  const stack = (x, z, along, tiers = 2, mat = mats.steel) => {
+  // Crates inside, one stacked: cover to fight around, not a maze.
+  block(WARE_X - 5.5, 0, WARE_Z + 2.5, 1.6, 1.6, 1.6, materials.crate);
+  block(WARE_X - 5.5, 1.6, WARE_Z + 2.5, 1.6, 1.6, 1.6, materials.crate);
+  block(WARE_X + 4.2, 0, WARE_Z - 3.4, 1.6, 1.6, 1.6, materials.crate);
+  block(WARE_X + 2.4, 0, WARE_Z + 5.2, 1.6, 1.6, 1.6, materials.crate);
+  block(WARE_X - 3.2, 0, WARE_Z - 5.6, 1.6, 1.6, 1.6, materials.crate);
+
+  // ---------------------------------------------------------------- site B: the container yard
+
+  const YARD_X = 17;
+  const YARD_Z = -13;
+  const CONT_W = 6.1;
+  const CONT_H = 2.55;
+  const CONT_D = 2.5;
+
+  function container(x, z, tiers, material) {
     for (let t = 0; t < tiers; t += 1) {
-      solid(x, t * 2.6, z, along === 'x' ? 6.1 : 2.5, 2.55, along === 'x' ? 2.5 : 6.1, t === tiers - 1 ? mat : mats.rust);
+      block(x, t * CONT_H, z, CONT_W, CONT_H, CONT_D, material);
     }
-  };
-  stack(bx - 5, -18, 'x', 2);
-  stack(bx + 5, -18, 'x', 2, mats.rust);
-  stack(bx - 5, -13, 'z', 1);
-  stack(bx + 6.5, -12.5, 'z', 2);
-  stack(bx, -7.5, 'x', 1);
-  stack(bx - 8.5, -8, 'z', 1);
-  // Low cover in a ring around the objective: holdable from behind, crossable when you have to.
-  solid(bx, 0, -12.5, 2.5, 1.4, 2.5, mats.crate);
-  solid(bx + 3.5, 0, -15.5, 1.4, 1.4, 1.4, mats.crate);
-  solid(bx - 3.5, 0, -15.5, 1.4, 1.4, 1.4, mats.crate);
-
-  // Mid: a spine wall with two gaps, so the long sightline exists but is never free.
-  solid(-3.5, 0, 2, 9, 2.3, 0.8, mats.concrete);
-  solid(4.2, 0, 2, 5.6, 2.3, 0.8, mats.concrete);
-  solid(0, 2.3, 2, 1.4, 1.2, 0.8, mats.concrete, { solid: false });
-  // Crates that break the sightline without closing it.
-  solid(-7.5, 0, 6.5, 1.6, 1.6, 1.6, mats.crate);
-  solid(-6.2, 0, 6.5, 1.6, 1.6, 1.6, mats.crate);
-  solid(7.8, 0, 6.5, 1.6, 1.6, 1.6, mats.crate);
-  solid(9.1, 1.6, 6.5, 1.6, 1.6, 1.6, mats.crate);
-  solid(-11, 0, -2, 1.4, 1.4, 1.4, mats.crate);
-  solid(11.5, 0, -1, 1.4, 1.4, 1.4, mats.crate);
-
-  // Connectors: the west wall separates the warehouse approach from mid; the east
-  // makes the B approach tight.
-  solid(-13.5, 0, 8, 0.9, 3.2, 14, mats.concrete);
-  solid(-23.5, 0, 9, 0.9, 3.2, 10, mats.concrete);
-  solid(13.5, 0, 9, 2.5, 2.6, 13, mats.rust);
-  solid(24.5, 0, 12, 2.5, 2.6, 8, mats.steel);
-
-  // Spawn aprons, painted not built, plus a few crates so a spawn is not a lineup.
-  solid(0, 0, 24, 14, 0.06, 10, mats.dock, { solid: false, shootable: false });
-  solid(0, 0, -26, 14, 0.06, 10, mats.warden, { solid: false, shootable: false });
-  for (const [x, z] of [[-7.5, 26], [7.5, 26], [-7.5, -28], [7.5, -28]]) {
-    solid(x, 0, z, 1.5, 1.5, 1.5, mats.crate);
   }
 
-  // Dock lamps: the light the yard is really lit by.
+  const yardSteel = materials.rust;
+  const yardSteel2 = materials.steel;
+  container(YARD_X - 5.4, YARD_Z - 5.6, 3, yardSteel);
+  container(YARD_X + 0.9, YARD_Z - 5.6, 2, yardSteel2);
+  // The third column stays open: the lane that makes the yard a place you can cross.
+  container(YARD_X - 5.4, YARD_Z + 0.4, 2, yardSteel2);
+  container(YARD_X + 0.9, YARD_Z + 0.4, 3, yardSteel);
+  container(YARD_X - 5.4, YARD_Z + 6.4, 1, yardSteel);
+  container(YARD_X + 0.9, YARD_Z + 6.4, 2, yardSteel2);
+
+  block(YARD_X + 1.2, 0, YARD_Z + 3.4, 1.6, 1.6, 1.6, materials.crate);
+  block(YARD_X - 2.4, 0, YARD_Z + 3.4, 1.6, 1.6, 1.6, materials.crate);
+  block(YARD_X - 0.6, 0, YARD_Z - 2.6, 1.6, 1.6, 1.6, materials.crate);
+
+  // ---------------------------------------------------------------- the middle spine
+
+  // A low wall across the yard at z ~ 2, with the gap at x ~ 0 that every rotation runs through.
+  block(-7.5, 0, 2, 13, 1.15, 0.55, materials.concrete);
+  block(7.5, 0, 2, 13, 1.15, 0.55, materials.concrete);
+  block(0, 2.1, 2, 3.2, 0.7, 0.55, materials.concrete, { solid: false });
+
+  // Crates around the crossing, so the gap is a decision and not a doorway.
+  block(-2.6, 0, 5.2, 1.6, 1.6, 1.6, materials.crate);
+  block(2.8, 0, -1.4, 1.6, 1.6, 1.6, materials.crate);
+  block(-3.4, 0, -2.2, 1.6, 1.6, 1.6, materials.crate);
+  block(3.2, 0, 5.6, 1.6, 1.6, 1.6, materials.crate);
+
+  // Two long low walls that give the flanks a shape.
+  block(-13.5, 0, 9, 0.6, 1.5, 12, materials.concrete);
+  block(13.5, 0, 9, 0.6, 1.5, 12, materials.concrete);
+
+  // The rust shed on the east flank: a small hard corner to hold.
+  block(13.5, 0, -4.5, 5.4, 3.1, 0.5, materials.rust);
+  block(13.5, 0, -8.6, 5.4, 3.1, 0.5, materials.rust);
+  block(10.9, 0, -6.55, 0.5, 3.1, 4.2, materials.rust);
+  block(16.1, 0, -6.55, 0.5, 3.1, 4.2, materials.rust);
+  block(13.5, 3.1, -6.55, 5.4, 0.25, 4.6, materials.steel, { solid: false });
+
+  // Barrels and pallets: small cover that breaks up the open ground between the lanes.
+  const BARRELS = [[-5.6, 8.4], [-4.7, 8.9], [6.2, 6.3], [7.1, 6.8], [-9.6, -6.4], [9.9, 12.3], [-19.5, 6.2], [19.8, 2.4]];
+  for (const [bx, bz] of BARRELS) {
+    block(bx, 0, bz, 0.64, 1.06, 0.64, materials.rust, { round: true });
+  }
+
+  // ---------------------------------------------------------------- spawn decks
+
+  paint(0, 26, 22, 6, materials.dockPaint);
+  paint(0, -28, 22, 6, materials.wardenPaint);
+  paint(0, 2, 26, 0.18, materials.line);
+  paint(-13.5, 20, 0.18, 24, materials.line);
+  paint(13.5, 20, 0.18, 24, materials.line);
+
+  // ---------------------------------------------------------------- lamp posts
+
   const halos = [];
-  const rings = [];
-  const lampPosts = [
-    [-9, 0, 14],
-    [9, 0, 14],
-    [-9, 0, -14],
-    [9, 0, -14],
-    [0, 0, 0],
+  const LAMPS = [
+    [-8, 16], [8, 16], [-8, -4], [8, -4],
+    [-24, 6], [24, 6], [-24, -24], [24, -24],
   ];
-  const accentColor = () => {
-    const c = rgb('accent');
-    return new THREE.Color(c.r, c.g, c.b);
-  };
-  for (const [x, , z] of lampPosts) {
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 5.4, 8), mats.steel);
-    pole.position.set(x, 2.7, z);
-    pole.castShadow = true;
-    group.add(pole);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), mats.accent);
-    head.position.set(x, 5.35, z);
-    group.add(head);
-    // A halo, not a bigger bulb: the glow carries at distance and costs one sphere.
-    const halo = new THREE.Mesh(
-      new THREE.SphereGeometry(0.68, 12, 10),
-      new THREE.MeshBasicMaterial({
-        color: accentColor(),
-        transparent: true,
-        opacity: 0.18,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
-    );
-    halo.position.set(x, 5.35, z);
+  const haloMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffd9a0, transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const haloGeometry = new THREE.SphereGeometry(0.85, 10, 8);
+  for (const [lx, lz] of LAMPS) {
+    block(lx, 0, lz, 0.24, 4.2, 0.24, materials.steel, { round: true, shadow: false });
+    const lamp = new THREE.PointLight(0xffd9a0, 1.15, 19, 2);
+    lamp.position.set(lx, 4.35, lz);
+    group.add(lamp);
+    const halo = new THREE.Mesh(haloGeometry, haloMaterial);
+    halo.position.set(lx, 4.35, lz);
     group.add(halo);
     halos.push(halo);
-    const lamp = new THREE.PointLight(accentColor(), 18, 26, 2);
-    lamp.position.set(x, 5.2, z);
-    group.add(lamp);
-    shootables.push(pole);
   }
 
-  // Objectives: a painted ring and a mast each, readable from the far spawn.
+  // ---------------------------------------------------------------- sites
+
   const sites = [
-    { id: 'A', name: 'Warehouse', x: wx + 0.5, z: -12.5, radius: 5.2 },
-    { id: 'B', name: 'Container yard', x: bx, z: -13, radius: 5.0 },
+    { id: 'A', name: 'Warehouse', x: -16.5, z: -12.5, radius: 5.2 },
+    { id: 'B', name: 'Container yard', x: 17, z: -13, radius: 5.0 },
   ];
+
+  const ringGeometry = new THREE.RingGeometry(0.86, 1, 40);
+  const rings = [];
   for (const site of sites) {
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(site.radius - 0.18, site.radius, 48),
-      new THREE.MeshBasicMaterial({
-        color: accentColor(),
-        transparent: true,
-        opacity: 0.42,
-        side: THREE.DoubleSide,
-      }),
+      ringGeometry,
+      new THREE.MeshBasicMaterial({ color: PALETTE.accent, transparent: true, opacity: 0.42, side: THREE.DoubleSide }),
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(site.x, 0.02, site.z);
+    ring.position.set(site.x, 0.03, site.z);
+    ring.scale.setScalar(site.radius);
     group.add(ring);
     rings.push(ring);
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.2, 6), mats.accent);
-    mast.position.set(site.x, 1.1, site.z);
-    group.add(mast);
+
+    // The letter, painted on a canvas once and floated over the site.
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = PALETTE.accent;
+    ctx.font = 'bold 46px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(site.id, 32, 34);
+    const texture = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
+    sprite.position.set(site.x, 3.1, site.z);
+    sprite.scale.set(1.6, 1.6, 1.6);
+    group.add(sprite);
   }
 
-  // Sky: a three-band dome, so the yard has a horizon behind the wall.
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(150, 24, 16),
-    new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      depthWrite: false,
-      fog: false,
-      uniforms: {
-        band: { value: new THREE.Color(0x1b2a38) },
-        haze: { value: new THREE.Color(0x46606f) },
-        dusk: { value: new THREE.Color(0xa9793f) },
-      },
-      vertexShader: `
-        varying float elev;
-        void main() {
-          vec4 world = modelMatrix * vec4(position, 1.0);
-          elev = normalize(world.xyz).y;
-          gl_Position = projectionMatrix * viewMatrix * world;
-        }`,
-      fragmentShader: `
-        uniform vec3 band; uniform vec3 haze; uniform vec3 dusk;
-        varying float elev;
-        void main() {
-          float t = clamp(elev * 1.7 + 0.22, 0.0, 1.0);
-          vec3 c = mix(dusk, haze, smoothstep(0.0, 0.38, t));
-          c = mix(c, band, smoothstep(0.34, 1.0, t));
-          gl_FragColor = vec4(c, 1.0);
-        }`,
-    }),
-  );
-  sky.frustumCulled = false;
-  scene.add(sky);
+  // ---------------------------------------------------------------- spawns
 
-  // Light. A working yard at dusk, not night: fog that lifts, a low sun, a bright sky
-  // bounce and a flat ambient floor so shadowed faces stay readable.
-  const fogColor = rgb('canvas');
-  scene.fog = new THREE.Fog(new THREE.Color(fogColor.r, fogColor.g, fogColor.b), 52, 150);
-  const hemi = new THREE.HemisphereLight(0xa8c4d8, 0x5a5145, 1.75);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffe0b8, 2.15);
-  sun.position.set(26, 34, 18);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -42;
-  sun.shadow.camera.right = 42;
-  sun.shadow.camera.top = 42;
-  sun.shadow.camera.bottom = -42;
-  sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 120;
-  sun.shadow.bias = -0.0009;
-  sun.shadow.normalBias = 0.03;
-  scene.add(sun);
-  const ambient = new THREE.AmbientLight(0xdfe8f2, 0.55);
-  scene.add(ambient);
-  const rim = new THREE.DirectionalLight(0x4a6f8c, 0.5);
-  rim.position.set(-24, 16, -26);
-  scene.add(rim);
-
-
+  // yaw 0 looks down -Z and yaw PI looks down +Z, so each side faces the middle of the yard.
   const spawns = {
     dock: [
-      { x: -5, z: 27, yaw: Math.PI },
-      { x: -2, z: 28, yaw: Math.PI },
-      { x: 2, z: 28, yaw: Math.PI },
-      { x: 5, z: 27, yaw: Math.PI },
-      { x: 0, z: 26, yaw: Math.PI },
+      { x: -5, z: 27, yaw: 0 },
+      { x: -2, z: 28, yaw: 0 },
+      { x: 2, z: 28, yaw: 0 },
+      { x: 5, z: 27, yaw: 0 },
+      { x: 0, z: 26, yaw: 0 },
     ],
     warden: [
-      { x: -5, z: -28, yaw: 0 },
-      { x: -2, z: -29, yaw: 0 },
-      { x: 2, z: -29, yaw: 0 },
-      { x: 5, z: -28, yaw: 0 },
-      { x: 0, z: -27, yaw: 0 },
+      { x: -5, z: -28, yaw: Math.PI },
+      { x: -2, z: -29, yaw: Math.PI },
+      { x: 2, z: -29, yaw: Math.PI },
+      { x: 5, z: -28, yaw: Math.PI },
+      { x: 0, z: -27, yaw: Math.PI },
     ],
   };
 
+  // ---------------------------------------------------------------- queries
 
-  const nav = buildLattice(colliders);
-
-  function blockedAt(x, z, radius = BOT_RADIUS) {
-    for (const c of colliders) {
-      if (c.maxY <= 0.32) continue; // a painted apron or a kerb is not an obstacle
-      if (
-        x + radius > c.minX &&
-        x - radius < c.maxX &&
-        z + radius > c.minZ &&
-        z - radius < c.maxZ &&
-        c.minY < 1.8
-      ) {
-        return true;
-      }
+  /** Is a body of radius r standing at (x, z) inside something it may not pass? */
+  function blockedAt(x, z, r = BOT_RADIUS) {
+    for (let i = 0; i < colliders.length; i += 1) {
+      const c = colliders[i];
+      if (c.maxY <= WALK_BAND_LOW || c.minY >= WALK_BAND_HIGH) continue;
+      const nx = Math.max(c.minX, Math.min(x, c.maxX));
+      const nz = Math.max(c.minZ, Math.min(z, c.maxZ));
+      const dx = x - nx;
+      const dz = z - nz;
+      if (dx * dx + dz * dz < r * r) return true;
     }
     return false;
   }
 
-  
-  function groundAt(x, z, from = 2.2) {
-    let best = 0;
-    for (const c of colliders) {
-      if (x > c.minX && x < c.maxX && z > c.minZ && z < c.maxZ && c.maxY <= from && c.maxY > best) {
-        best = c.maxY;
-      }
+  /** The highest surface under (x, z) that is at or below `from`. */
+  function groundAt(x, z, from = 10) {
+    let top = 0;
+    for (let i = 0; i < colliders.length; i += 1) {
+      const c = colliders[i];
+      if (c.maxY > from + 0.1 || c.maxY <= top) continue;
+      if (x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) continue;
+      top = c.maxY;
     }
-    return best;
+    return top;
   }
 
-  // Bake the transforms: the world never moves, and a raycast before the first render would see
-  // every plane unrotated.
+  // ---------------------------------------------------------------- navigation lattice
+
+  function buildNav() {
+    const xs = [];
+    for (let x = bounds.minX + NAV_INSET; x <= bounds.maxX - NAV_INSET; x += NAV_SPACING) xs.push(x);
+    const zs = [];
+    for (let z = bounds.minZ + NAV_INSET; z <= bounds.maxZ - NAV_INSET; z += NAV_SPACING) zs.push(z);
+    const cols = xs.length;
+    const nodes = [];
+
+    for (let zi = 0; zi < zs.length; zi += 1) {
+      for (let xi = 0; xi < cols; xi += 1) {
+        nodes.push({
+          id: zi * cols + xi,
+          x: xs[xi],
+          z: zs[zi],
+          col: xi,
+          row: zi,
+          walkable: !blockedAt(xs[xi], zs[zi], BOT_RADIUS),
+          links: [],
+        });
+      }
+    }
+
+    // A walkable pair of nodes 2.5 m apart can still have a wall between them, so the segment is
+    // sampled before the two are linked. Linking on distance alone sends bots into that wall forever.
+    const steps = Math.max(2, Math.ceil(NAV_SPACING / 0.5));
+    function segmentClear(a, b) {
+      for (let s = 1; s < steps; s += 1) {
+        const t = s / steps;
+        const x = a.x + (b.x - a.x) * t;
+        const z = a.z + (b.z - a.z) * t;
+        if (blockedAt(x, z, BOT_RADIUS * 0.8)) return false;
+      }
+      return true;
+    }
+
+    const OFFSETS = [
+      [-1, -1], [0, -1], [1, -1],
+      [-1, 0], [1, 0],
+      [-1, 1], [0, 1], [1, 1],
+    ];
+    for (let i = 0; i < nodes.length; i += 1) {
+      const node = nodes[i];
+      if (!node.walkable) continue;
+      for (const [dx, dz] of OFFSETS) {
+        const col = node.col + dx;
+        const row = node.row + dz;
+        if (col < 0 || col >= cols || row < 0 || row >= zs.length) continue;
+        const other = nodes[row * cols + col];
+        if (!other.walkable) continue;
+        if (!segmentClear(node, other)) continue;
+        node.links.push(other.id);
+      }
+    }
+
+    function at(x, z) {
+      const col = Math.round((x - (bounds.minX + NAV_INSET)) / NAV_SPACING);
+      const row = Math.round((z - (bounds.minZ + NAV_INSET)) / NAV_SPACING);
+      const clampedCol = Math.max(0, Math.min(cols - 1, col));
+      const clampedRow = Math.max(0, Math.min(zs.length - 1, row));
+      return clampedRow * cols + clampedCol;
+    }
+
+    function neighbours(id) {
+      const node = nodes[id];
+      return node ? node.links : [];
+    }
+
+    return { nodes, at, neighbours, cols, rows: zs.length, spacing: NAV_SPACING };
+  }
+
+  const nav = buildNav();
+
+  // The map joins the scene itself, and the haze that gives the far containers depth.
+  scene.add(group);
+  scene.fog = new THREE.Fog(0x46606f, 52, 150);
+
+  // The one line the map cannot work without.
   group.updateMatrixWorld(true);
 
-  // The map breathes: rings pulse, halos flicker, so the yard is not a photograph.
+  // ---------------------------------------------------------------- animation
+
   let clock = 0;
   function tick(dt) {
     clock += dt;
     for (let i = 0; i < rings.length; i += 1) {
-      rings[i].material.opacity = 0.34 + 0.16 * Math.sin(clock * 1.7 + i * 2.1);
+      const ring = rings[i];
+      ring.material.opacity = 0.3 + Math.sin(clock * 1.6 + i * 1.7) * 0.14;
+      ring.scale.setScalar(sites[i].radius * (1 + Math.sin(clock * 1.1 + i) * 0.02));
     }
     for (let i = 0; i < halos.length; i += 1) {
-      halos[i].material.opacity = 0.16 + 0.05 * Math.sin(clock * 2.6 + i * 1.3);
+      halos[i].material.opacity = 0.1 + Math.sin(clock * 2.3 + i * 2.1) * 0.035;
     }
   }
 
-  return { group, colliders, shootables, spawns, sites, nav, bounds: BOUNDS, blockedAt, groundAt, tick, BOT_RADIUS };
-}
-
-/** The walkable lattice and its adjacency list: one node every 2.5 m, 8-connected, pruned. */
-function buildLattice(colliders) {
-  const step = 2.5;
-  const nodes = [];
-  const index = new Map();
-  const key = (x, z) => `${Math.round(x * 10)}:${Math.round(z * 10)}`;
-
-  const walkable = (x, z) => {
-    if (x < BOUNDS.minX + 1.2 || x > BOUNDS.maxX - 1.2) return false;
-    if (z < BOUNDS.minZ + 1.2 || z > BOUNDS.maxZ - 1.2) return false;
-    for (const c of colliders) {
-      if (c.maxY <= 0.32 || c.minY >= 1.7) continue;
-      if (x > c.minX - BOT_RADIUS && x < c.maxX + BOT_RADIUS && z > c.minZ - BOT_RADIUS && z < c.maxZ + BOT_RADIUS) {
-        return false;
-      }
-    }
-    return true;
+  return {
+    group, colliders, shootables, spawns, sites, nav, bounds,
+    blockedAt, groundAt, tick,
+    BOT_RADIUS,
+    materials,
+    fogColor: new THREE.Color('#46606f'),
   };
-
-  for (let z = BOUNDS.minZ + 1.2; z <= BOUNDS.maxZ - 1.2; z += step) {
-    for (let x = BOUNDS.minX + 1.2; x <= BOUNDS.maxX - 1.2; x += step) {
-      if (!walkable(x, z)) continue;
-      const id = nodes.length;
-      nodes.push({ id, x, z, links: [] });
-      index.set(key(x, z), id);
-    }
-  }
-
-  /** The node nearest a point: every post a bot is sent to is one. */
-  const at = (x, z) => {
-    let best = -1;
-    let bestD = Infinity;
-    for (const node of nodes) {
-      const d = (node.x - x) ** 2 + (node.z - z) ** 2;
-      if (d < bestD) {
-        bestD = d;
-        best = node.id;
-      }
-    }
-    return best;
-  };
-
-  /** Is the straight line between two nodes walkable, or is there a wall in it? */
-  const segmentClear = (ax, az, bx2, bz) => {
-    const length = Math.hypot(bx2 - ax, bz - az);
-    const samples = Math.max(2, Math.ceil(length / 0.45));
-    for (let i = 1; i < samples; i += 1) {
-      const t = i / samples;
-      if (!walkable(ax + (bx2 - ax) * t, az + (bz - az) * t)) return false;
-    }
-    return true;
-  };
-
-  for (const node of nodes) {
-    for (let dz = -step; dz <= step; dz += step) {
-      for (let dx = -step; dx <= step; dx += step) {
-        if (!dx && !dz) continue;
-        const other = index.get(key(node.x + dx, node.z + dz));
-        if (other === undefined) continue;
-        if (dx && dz) {
-          // No cutting a corner: a diagonal needs both orthogonal neighbours.
-          const a = index.get(key(node.x + dx, node.z));
-          const b = index.get(key(node.x, node.z + dz));
-          if (a === undefined || b === undefined) continue;
-        }
-        if (!segmentClear(node.x, node.z, nodes[other].x, nodes[other].z)) continue;
-        node.links.push(other);
-      }
-    }
-  }
-  return { nodes, at, step };
 }

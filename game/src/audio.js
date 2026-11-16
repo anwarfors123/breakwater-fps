@@ -1,218 +1,174 @@
-// Every sound is synthesised with WebAudio: no audio file ships. A cue is a short graph
-// of an oscillator, a noise buffer and a filter envelope, built on the first gesture.
+// Every sound in the game, synthesised: no audio files, no network. One AudioContext, one noise
+// buffer, one master gain. Each cue is an oscillator or a burst of filtered noise with its own
+// envelope.
+//
+// Two rules that matter. A cue is never scheduled into a suspended context — browsers start the
+// context suspended until a real user gesture, and queueing a hundred shots into it makes them all
+// fire at once on resume, so every cue checks live() first. And a distant shot is attenuated by
+// 1 / (1 + distance / 16), which keeps a firefight across the yard audible without being deafening.
 
-const NOISE_SECONDS = 1;
+const MAX_DISTANCE_GAIN = 0.06;
 
 export function createAudio() {
   let ctx = null;
   let master = null;
-  let noise = null;
+  let noiseBuffer = null;
   let muted = false;
 
-  /** Build the context, master bus and noise buffer. */
-  function ensure() {
-    if (ctx) return ctx;
-    const Ctor = window.AudioContext ?? window.webkitAudioContext;
-    if (!Ctor) return null;
-    ctx = new Ctor();
-    master = ctx.createGain();
-    master.gain.value = 0.5;
-    master.connect(ctx.destination);
-    // One second of darkened noise: cheaper than pure white, reads as gravel.
-    noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
-    const data = noise.getChannelData(0);
-    let running = 0;
-    for (let i = 0; i < data.length; i += 1) {
-      running = running * 0.35 + (Math.random() * 2 - 1) * 0.65;
-      data[i] = running;
-    }
-    return ctx;
-  }
-
-  /** Resume the context: from a click or a key handler, never on load. */
-  function unlock() {
-    const c = ensure();
-    if (c && c.state === 'suspended') c.resume();
-  }
-
-
-  function gain(level, pan = 0) {
-    const g = ctx.createGain();
-    g.gain.value = level;
-    if (pan && ctx.createStereoPanner) {
-      const p = ctx.createStereoPanner();
-      p.pan.value = Math.max(-1, Math.min(1, pan));
-      g.connect(p);
-      p.connect(master);
-    } else {
-      g.connect(master);
-    }
-    return g;
-  }
-
-
   function live() {
-    return !!ctx && !muted && ctx.state === 'running';
+    return ctx !== null && ctx.state === 'running' && !muted;
   }
 
+  /** A real user gesture must call this before anything is audible. */
+  function unlock() {
+    if (ctx === null) {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return;
+      ctx = new Ctor();
+      master = ctx.createGain();
+      master.gain.value = 0.5;
+      master.connect(ctx.destination);
 
-  function burst({ level, decay, filter, q = 1, pan = 0 }) {
-    if (!live()) return;
-    const src = ctx.createBufferSource();
-    src.buffer = noise;
-    const bq = ctx.createBiquadFilter();
-    bq.type = 'lowpass';
-    bq.frequency.setValueAtTime(filter, ctx.currentTime);
-    bq.frequency.exponentialRampToValueAtTime(Math.max(120, filter * 0.18), ctx.currentTime + decay);
-    bq.Q.value = q;
-    const g = gain(level, pan);
-    g.gain.setValueAtTime(level, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + decay);
-    src.connect(bq);
-    bq.connect(g);
-    src.start();
-    src.stop(ctx.currentTime + decay + 0.02);
-  }
-
-
-  function tone({ freq, to, level, decay, type = 'sine', pan = 0 }) {
-    if (!live()) return;
-    const osc = ctx.createOscillator();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, ctx.currentTime);
-    if (to) osc.frequency.exponentialRampToValueAtTime(to, ctx.currentTime + decay);
-    const g = gain(level, pan);
-    g.gain.setValueAtTime(level, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + decay);
-    osc.connect(g);
-    osc.start();
-    osc.stop(ctx.currentTime + decay + 0.02);
-  }
-
-  // A shot is three layers: crack, body, tail.
-  function shot(kind, pan = 0, distance = 0) {
-    if (!ctx || muted) return;
-    // Air and distance: a rifle 50 m away is a thud, not a crack beside your ear.
-    const near = 1 / (1 + distance / 16);
-    const at = (level) => level * Math.max(0.06, near);
-    pan = pan * Math.min(1, 2 * near);
-    if (kind === 'rifle') {
-      burst({ level: at(0.5), decay: 0.19, filter: 3200, q: 0.8, pan });
-      tone({ freq: 190, to: 60, level: at(0.34), decay: 0.16, type: 'triangle', pan });
-      return;
+      const frames = Math.floor(ctx.sampleRate * 0.4);
+      noiseBuffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < frames; i += 1) data[i] = Math.random() * 2 - 1;
     }
-    if (kind === 'smg') {
-      burst({ level: at(0.34), decay: 0.1, filter: 4200, q: 0.7, pan });
-      tone({ freq: 260, to: 120, level: at(0.2), decay: 0.08, type: 'square', pan });
-      return;
-    }
-    if (kind === 'sniper') {
-      burst({ level: at(0.6), decay: 0.34, filter: 2600, q: 1.1, pan });
-      tone({ freq: 130, to: 42, level: at(0.4), decay: 0.3, type: 'triangle', pan });
-      return;
-    }
-    burst({ level: at(0.28), decay: 0.08, filter: 3600, q: 0.6, pan });
-    tone({ freq: 320, to: 160, level: at(0.16), decay: 0.06, type: 'square', pan });
+    if (ctx.state === 'suspended') ctx.resume();
   }
 
-
-  function dryFire() {
-    if (!ctx || muted) return;
-    burst({ level: 0.12, decay: 0.035, filter: 2400, q: 2 });
-  }
-
-  function impact(pan = 0) {
-    if (!ctx || muted) return;
-    burst({ level: 0.16, decay: 0.06, filter: 1800, q: 3, pan });
-  }
-
-  function hit(lethal) {
-    if (!ctx || muted) return;
-    tone({ freq: lethal ? 880 : 620, to: lethal ? 440 : 500, level: 0.16, decay: 0.09, type: 'square' });
-  }
-
-
-  function reload(kind) {
-    if (!live()) return;
-    const at = ctx.currentTime;
-    const clicks = [
-      [0, 0.16],
-      [kind === 'sniper' ? 0.75 : 0.42, 0.2],
-    ];
-    for (const [offset, level] of clicks) {
-      const src = ctx.createBufferSource();
-      src.buffer = noise;
-      const bq = ctx.createBiquadFilter();
-      bq.type = 'bandpass';
-      bq.frequency.value = 1500;
-      bq.Q.value = 6;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, at + offset);
-      g.gain.exponentialRampToValueAtTime(level, at + offset + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, at + offset + 0.07);
-      src.connect(bq);
-      bq.connect(g);
-      g.connect(master);
-      src.start(at + offset);
-      src.stop(at + offset + 0.09);
-    }
-  }
-
-  function footstep(pan = 0) {
-    if (!ctx || muted) return;
-    burst({ level: 0.07, decay: 0.05, filter: 900, q: 1.4, pan });
-  }
-
-  function beep(pitch = 1) {
-    if (!ctx || muted) return;
-    tone({ freq: 1180 * pitch, level: 0.14, decay: 0.07, type: 'square' });
-  }
-
-  function explosion() {
-    if (!ctx || muted) return;
-    burst({ level: 0.7, decay: 0.9, filter: 1800, q: 0.5 });
-    tone({ freq: 90, to: 30, level: 0.5, decay: 0.8, type: 'triangle' });
-  }
-
-  function sting(win) {
-    if (!ctx || muted) return;
-    const notes = win ? [392, 523.25, 659.25] : [392, 329.63, 261.63];
-    notes.forEach((freq, index) => {
-      setTimeout(() => {
-        if (!ctx || muted) return;
-        tone({ freq, level: 0.14, decay: 0.34, type: 'triangle' });
-      }, index * 110);
-    });
-  }
-
-  /** Mute or unmute the mix; returns the new state. */
   function toggle() {
     muted = !muted;
     if (master) master.gain.value = muted ? 0 : 0.5;
-    return muted;
+    return !muted;
   }
 
-  return {
-    unlock,
-    shot,
-    dryFire,
-    impact,
-    hit,
-    reload,
-    footstep,
-    beep,
-    explosion,
-    sting,
-    toggle,
-    get muted() {
-      return muted;
-    },
-  
-    panFor(dx, dz, yaw) {
-      const right = Math.cos(yaw) * dx - Math.sin(yaw) * dz;
-      const ahead = -Math.sin(yaw) * dx - Math.cos(yaw) * dz;
-      if (ahead <= 0.2) return 0;
-      return Math.max(-0.9, Math.min(0.9, right / Math.max(6, Math.hypot(dx, dz))));
-    },
+  function panner(pan) {
+    if (typeof ctx.createStereoPanner !== 'function') return null;
+    const node = ctx.createStereoPanner();
+    node.pan.value = Math.max(-1, Math.min(1, pan));
+    return node;
+  }
+
+  function noise(duration, gain, filterType, frequency, pan) {
+    const source = ctx.createBufferSource();
+    source.buffer = noiseBuffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.value = frequency;
+    const envelope = ctx.createGain();
+    const now = ctx.currentTime;
+    envelope.gain.setValueAtTime(gain, now);
+    envelope.gain.exponentialRampToValueAtTime(0.0008, now + duration);
+    source.connect(filter);
+    filter.connect(envelope);
+    const p = panner(pan);
+    if (p) {
+      envelope.connect(p);
+      p.connect(master);
+    } else {
+      envelope.connect(master);
+    }
+    source.start(now);
+    source.stop(now + duration + 0.02);
+  }
+
+  function tone(type, from, to, duration, gain, pan, delay = 0) {
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    const envelope = ctx.createGain();
+    const now = ctx.currentTime + delay;
+    osc.frequency.setValueAtTime(from, now);
+    if (to !== from) osc.frequency.exponentialRampToValueAtTime(Math.max(1, to), now + duration);
+    envelope.gain.setValueAtTime(0.0001, now);
+    envelope.gain.exponentialRampToValueAtTime(gain, now + 0.006);
+    envelope.gain.exponentialRampToValueAtTime(0.0008, now + duration);
+    osc.connect(envelope);
+    const p = panner(pan);
+    if (p) {
+      envelope.connect(p);
+      p.connect(master);
+    } else {
+      envelope.connect(master);
+    }
+    osc.start(now);
+    osc.stop(now + duration + 0.02);
+  }
+
+  // One character per gun: the pistol cracks, the SMG snaps, the rifle barks, the sniper booms.
+  const SHOTS = {
+    tally: { noise: 0.1, gain: 0.22, filter: 'bandpass', frequency: 1800, body: 220, bodyGain: 0.16, bodyType: 'square' },
+    skiff: { noise: 0.07, gain: 0.19, filter: 'bandpass', frequency: 2400, body: 300, bodyGain: 0.12, bodyType: 'square' },
+    harbor: { noise: 0.12, gain: 0.26, filter: 'lowpass', frequency: 1500, body: 160, bodyGain: 0.2, bodyType: 'sawtooth' },
+    longline: { noise: 0.26, gain: 0.3, filter: 'lowpass', frequency: 900, body: 90, bodyGain: 0.26, bodyType: 'sawtooth' },
   };
+
+  /** A shot, panned, quieter with distance: the sound of the other side of the yard. */
+  function shot(kind, pan = 0, distance = 0) {
+    if (!live()) return;
+    const spec = SHOTS[kind] ?? SHOTS.tally;
+    const falloff = Math.max(MAX_DISTANCE_GAIN, 1 / (1 + distance / 16));
+    noise(spec.noise, spec.gain * falloff, spec.filter, spec.frequency, pan);
+    tone(spec.bodyType, spec.body, spec.body * 0.55, spec.noise * 1.4, spec.bodyGain * falloff, pan);
+  }
+
+  function dryFire() {
+    if (!live()) return;
+    tone('square', 900, 320, 0.045, 0.07, 0);
+  }
+
+  function impact() {
+    if (!live()) return;
+    noise(0.06, 0.13, 'highpass', 2600, 0);
+  }
+
+  function hit(lethal) {
+    if (!live()) return;
+    tone('triangle', lethal ? 720 : 1180, lethal ? 300 : 900, lethal ? 0.16 : 0.06, 0.12, 0);
+  }
+
+  function reload(kind) {
+    if (!live()) return;
+    const heavy = kind === 'longline' || kind === 'harbor';
+    tone('square', heavy ? 220 : 320, heavy ? 150 : 220, 0.06, 0.09, 0);
+    tone('square', heavy ? 180 : 260, heavy ? 120 : 180, 0.08, 0.08, 0, 0.12);
+  }
+
+  function footstep(pan = 0) {
+    if (!live()) return;
+    noise(0.055, 0.05, 'lowpass', 420, pan);
+  }
+
+  function beep(pitch = 1.2) {
+    if (!live()) return;
+    tone('sine', 620 * pitch, 620 * pitch, 0.07, 0.1, 0);
+  }
+
+  function explosion() {
+    if (!live()) return;
+    noise(0.55, 0.42, 'lowpass', 900, 0);
+    tone('sawtooth', 120, 32, 0.5, 0.3, 0);
+  }
+
+  function sting(win) {
+    if (!live()) return;
+    const notes = win ? [523, 659, 784] : [392, 330, 262];
+    for (let i = 0; i < notes.length; i += 1) {
+      tone('triangle', notes[i], notes[i], 0.22, 0.11, 0, i * 0.13);
+    }
+  }
+
+  /**
+   * Where a sound sits between the ears: the offset from the listener projected onto the listener's
+   * right-hand vector (yaw 0 looks down -Z, so right is +X).
+   */
+  function panFor(dx, dz, listenerYaw = 0) {
+    const distance = Math.hypot(dx, dz);
+    if (distance < 0.001) return 0;
+    const rightX = Math.cos(listenerYaw);
+    const rightZ = -Math.sin(listenerYaw);
+    return Math.max(-1, Math.min(1, (dx * rightX + dz * rightZ) / distance));
+  }
+
+  return { unlock, toggle, shot, dryFire, impact, hit, reload, footstep, beep, explosion, sting, panFor };
 }

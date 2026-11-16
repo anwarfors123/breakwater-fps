@@ -35,7 +35,6 @@ function mulberry32(initial) {
 }
 const random = mulberry32(seed);
 
-// Renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -55,7 +54,6 @@ const hud = createHud();
 const audio = createAudio();
 const match = createMatch({ audio, random, sites: world.sites });
 
-// The player
 const spawnPoint = world.spawns.dock[2];
 const body = createBody(world.colliders, { ...spawnPoint, team: 'dock' });
 let weapon = createWeapon(WEAPONS.tally);
@@ -73,9 +71,6 @@ const playerActor = {
   isPlayer: true,
 };
 
-// A first-person player has no model, which used to mean no hitbox: every bot bullet passed
-// straight through. Two invisible boxes give them a chest and a head, hidden from the camera
-// but solid to a raycast.
 const proxyMaterial = new THREE.MeshStandardMaterial({ visible: false });
 const proxyChest = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.02, 0.46), proxyMaterial);
 proxyChest.position.y = 0.9;
@@ -89,11 +84,8 @@ proxyHead.userData = { bot: playerActor, part: 'head' };
 playerActor.hitMeshes = [proxyChest, proxyHead];
 playerActor.parts = { head: proxyHead, body: proxyChest };
 
-// The bots: four teammates and five opponents
 const BOT_NAMES_DOCK = ['Kestrel', 'Marlow', 'Pike', 'Rook'];
 const BOT_NAMES_WARDEN = ['Halyard', 'Cinder', 'Dray', 'Voss'];
-// Who gets the sniper is fixed, so each squad plays the same way every match: one long rifle, one
-// SMG, and rifles for the rest.
 const DOCK_KITS = ['longline', 'harbor', 'skiff', 'harbor'];
 const WARDEN_KITS = ['harbor', 'longline', 'skiff', 'harbor'];
 
@@ -127,10 +119,6 @@ BOT_NAMES_WARDEN.forEach((name, index) => {
 
 let actors = [playerActor, ...bots];
 
-// Frag grenades
-// A frag is the answer to a corner you cannot see into, and the only damage in the game that can
-// be committed to before the target is visible. It does not reach through a wall: the same wall
-// that hides a defender hides them from the blast, which is what makes holding a corner a plan.
 let frags = 0;
 let shake = 0;
 const blastRay = new THREE.Raycaster();
@@ -148,7 +136,6 @@ function losClear(x0, y0, z0, x1, y1, z1) {
   return blastRay.intersectObjects(world.shootables, false).length === 0;
 }
 
-/** Damage falls off with distance from the blast and stops at the first wall. */
 function blast(x, y, z) {
   const radius = GRENADE.radius;
   for (const b of bots) {
@@ -180,7 +167,6 @@ function throwFrag() {
   hud.setGrenades(frags);
 }
 
-// The view model: whatever you bought, in the corner of the eye
 const viewmodel = createViewmodel(camera);
 const bombModel = createBombModel(scene, audio);
 let bombShown = false;
@@ -188,7 +174,6 @@ const muzzleFlash = new THREE.PointLight(0xffd9a0, 0, 9, 2);
 const muzzlePoint = new THREE.Vector3();
 camera.add(muzzleFlash);
 
-// Minimap: the yard from above, so the sites are not a rumour
 const minimapCanvas = document.getElementById('minimap');
 const minimapCtx = minimapCanvas?.getContext('2d');
 const MM = (() => {
@@ -201,7 +186,6 @@ const MM = (() => {
   const mx = (wx) => ox + (wx - b.minX) * s;
   const mz = (wz) => oz + (wz - b.minZ) * s;
 
-  // The yard never changes, so it is painted once into an offscreen layer.
   const layer = document.createElement('canvas');
   layer.width = layer.height = size;
   const g = layer.getContext('2d');
@@ -264,7 +248,6 @@ function drawMinimap() {
     }
   }
 
-  // You: a wedge pointing where you look.
   const p = body.state.position;
   g.save();
   g.translate(MM.mx(p.x), MM.mz(p.z));
@@ -280,12 +263,10 @@ function drawMinimap() {
   g.restore();
 }
 
-// Round bookkeeping
 const input = createInput(renderer.domElement, onLockChange);
 const raycaster = new THREE.Raycaster();
 const forward = new THREE.Vector3();
 const spectateEye = new THREE.Vector3();
-// Both long guns aim: the rifle narrows the field of view, the long rifle adds the tube as well.
 const SCOPES = { harbor: 52, longline: 26 };
 const scopeEl = document.getElementById('scope');
 const BASE_FOV = 78;
@@ -303,7 +284,6 @@ let bannerCooldown = 0;
 let buyOpen = false;
 let lastPhase = null;
 
-/** The nearest point on the navigation lattice: every post the bots are sent to is walkable. */
 function navPost(x, z) {
   const id = world.nav?.at(x, z);
   if (id == null || id < 0) return { x, z };
@@ -311,8 +291,6 @@ function navPost(x, z) {
   return { x: node.x, z: node.z };
 }
 
-// Two target lists, rebuilt once a frame instead of once per shooter: you hit the world and the
-// bots, a bot hits the world, the other bots and you. Nothing allocates mid-round.
 const playerTargets = [];
 const botTargets = [];
 
@@ -339,11 +317,6 @@ function hitTargets() {
 
 let scopeVisible = false;
 
-/**
- * Right button down: the eye goes to the scope. The field of view narrows, the mouse turns less per
- * pixel so the feel is the same, the cone tightens and the body slows — that is what makes stopping
- * to aim pay. Only the two long guns have a scope; the pistol and the SMG do nothing.
- */
 function updateAim(dt) {
   const def = weapon.state.def;
   const scoped = SCOPES[def.id] !== undefined;
@@ -357,8 +330,6 @@ function updateAim(dt) {
     camera.updateProjectionMatrix();
     input.state.sensitivity = 0.0022 * (fov / BASE_FOV);
   }
-  // Only the long rifle draws a tube over the screen. The rifle just brings the world closer:
-  // same narrowing, no optic, so you keep the whole picture while you aim.
   const show = def.id === 'longline' && aimBlend > 0.55;
   if (show !== scopeVisible) {
     scopeVisible = show;
@@ -369,7 +340,6 @@ function updateAim(dt) {
 
 function syncCamera() {
   const s = body.state;
-  // Dead: the camera sits in the watched bot's head and looks where they look.
   if (!playerActor.alive && spectateTarget && spectateTarget.alive) {
     const watched = spectateTarget;
     camera.position.copy(watched.eyePosition(spectateEye));
@@ -381,12 +351,10 @@ function syncCamera() {
   }
   camera.position.set(s.position.x, s.position.y + s.eye + s.bob, s.position.z);
   if (shake > 0.001) {
-    // A blast you cannot feel is a bang, not a grenade: the view kicks and settles.
     camera.position.x += (random() - 0.5) * shake * 0.2;
     camera.position.y += (random() - 0.5) * shake * 0.16;
   }
   camera.rotation.set(s.pitch, s.yaw, 0, 'YXZ');
-  // Keep the hitbox where the camera is, and take it out of the world when you are down.
   playerProxy.position.set(s.position.x, s.position.y, s.position.z);
   playerProxy.rotation.y = s.yaw;
   playerProxy.scale.y = 1 - s.crouch * 0.3;
@@ -394,13 +362,10 @@ function syncCamera() {
   playerProxy.updateMatrixWorld(true);
 }
 
-/** What a bot's bullet can hit: the world, the other bots, and you. */
 function botHitTargets() {
   return botTargets;
 }
 
-// A bot wants one class of gun and takes the best it can pay for on the way down to a pistol. The
-// variety is the point: four bots with the same rifle read as one bot copied four times.
 const PREF_LADDER = {
   longline: ['longline', 'harbor', 'skiff', 'tally'],
   harbor: ['harbor', 'skiff', 'tally'],
@@ -408,12 +373,6 @@ const PREF_LADDER = {
   tally: ['tally'],
 };
 
-/**
- * A bot shops from its team's wallet: the best gun on its ladder it can pay for, then a vest, then a
- * frag. `carried` is what a survivor already holds, so the team is not charged twice for one rifle —
- * and a survivor is not locked out of the shop either: a pistol from last round is what a buy phase
- * is for.
- */
 function botShop(bot, wallet, carried) {
   const ladder = PREF_LADDER[bot.pref] || PREF_LADDER.harbor;
   let pick = 'tally';
@@ -442,8 +401,6 @@ function botShop(bot, wallet, carried) {
 function beginRound() {
   const playerTeam = match.state.playerTeam;
   const playerSpawnList = world.spawns[playerTeam];
-  // Who lived through the last round keeps what they were carrying; who died starts over with a
-  // pistol. That is the whole point of a buy phase: a rifle is an investment across rounds.
   const firstRound = roundsPlayed === 0;
   roundsPlayed += 1;
   const playerSurvived = !firstRound && playerActor.alive;
@@ -473,8 +430,6 @@ function beginRound() {
   dockBots.forEach((b, i) => b.reset(world.spawns.dock[i]));
   wardenBots.forEach((b, i) => b.reset(world.spawns.warden[i]));
 
-  // The bots shop in the same freeze the player does, out of their team's wallet, best first: a
-  // survivor keeps the rifle it bought, a body coming back from a death buys again.
   const wallet = { money: 0 };
   for (const team of ['dock', 'warden']) {
     wallet.money = match.state.teamMoney[team];
@@ -490,12 +445,9 @@ function beginRound() {
     match.state.teamMoney[team] = wallet.money;
   }
 
-  // The charge is yours when your side is attacking: a bot carrier that never reaches a site
-  // leaves the round unfinishable, and planting is the player's job.
   for (const b of bots) b.hasBomb = false;
   playerActor.hasBomb = match.state.playerTeam === 'dock';
   if (!playerActor.hasBomb) {
-    // You are defending this half: a bot takes the charge and the bots have to plant it.
     const carrier = bots.filter((b) => b.team === 'dock').sort((a, b) => b.skill - a.skill)[0];
     if (carrier) carrier.hasBomb = true;
   }
@@ -506,11 +458,9 @@ function beginRound() {
   syncCamera();
 }
 
-// Damage numbers
 const damageLayer = document.getElementById('damage-layer');
 const dmgVec = new THREE.Vector3();
 
-/** Float the number over the actor that just took the hit. */
 function popDamage(actor, amount, kind = '') {
   if (!damageLayer || amount <= 0) return;
   const p = actor.body?.state?.position;
@@ -530,7 +480,6 @@ function popDamage(actor, amount, kind = '') {
   setTimeout(() => el.remove(), 900);
 }
 
-/** Damage you take has no body to hang over, so it lands under the crosshair. */
 function popDamageTaken(amount) {
   if (!damageLayer || amount <= 0) return;
   const el = document.createElement('div');
@@ -542,7 +491,6 @@ function popDamageTaken(amount) {
   setTimeout(() => el.remove(), 900);
 }
 
-// Shooting
 function playerShoot() {
   if (!playerActor.alive) return;
   const speedRatio = Math.min(1, body.state.speed / 5.7);
@@ -555,7 +503,6 @@ function playerShoot() {
   forward.applyAxisAngle(AXIS_X, cone.pitch);
   forward.applyAxisAngle(AXIS_Y, cone.yaw);
   forward.normalize();
-  // The shot is fired from the eye, then the body takes the kick.
   const origin = body.eyePosition(new THREE.Vector3());
   raycaster.set(origin, forward);
   raycaster.far = weapon.state.def.range;
@@ -591,7 +538,6 @@ function playerShoot() {
   hud.setVitals(body.state.health, playerActor.armour);
 }
 
-/** Pass the charge on: a carrier that dies must not leave the round unwinnable. */
 function handOffCharge(fromActor) {
   const team = fromActor.team;
   fromActor.hasBomb = false;
@@ -609,12 +555,10 @@ function handOffCharge(fromActor) {
   return heir;
 }
 
-// Spectating: dead is not the end of the round
 let spectateTarget = null;
 let boardShown = false;
 let boardRefresh = 0;
 
-/** Everyone still standing, teammates first — you can watch either side once you are down. */
 function spectateList() {
   const mates = bots.filter((b) => b.alive && b.team === playerActor.team);
   const foes = bots.filter((b) => b.alive && b.team !== playerActor.team);
@@ -637,7 +581,6 @@ function beginSpectate() {
   if (spectateTarget) hud.banner(`Spectating ${spectateTarget.name}`, 'phase', 2);
 }
 
-/** Damage the player takes, from any bot. */
 function hurtPlayer(amount, headshot, attacker) {
   if (!playerActor.alive) return;
   let left = amount;
@@ -662,7 +605,6 @@ function hurtPlayer(amount, headshot, attacker) {
   }
 }
 
-// Buying
 const BUY_LIST = [
   { ...WEAPONS.tally, key: '1' },
   { ...WEAPONS.skiff, key: '2' },
@@ -708,11 +650,9 @@ function openBuy() {
 function closeBuy() {
   buyOpen = false;
   hud.hideBuy();
-  // Leaving the menu must hand the mouse back, or the next thing you do is nothing.
   if (playerActor.alive) input.requestLock();
 }
 
-// Objective interaction
 let plantProgress = 0;
 let defuseProgress = 0;
 
@@ -720,7 +660,6 @@ function objectiveTick(dt) {
   const state = match.state;
   const p = body.state.position;
 
-  // Dead: hand the screen to whoever is still standing.
   if (!playerActor.alive) {
     if (!spectateTarget || !spectateTarget.alive) cycleSpectate(1);
     hud.setPrompt(
@@ -729,7 +668,6 @@ function objectiveTick(dt) {
     return;
   }
 
-  // Attacker with the charge, standing in a site: hold E to plant.
   if (state.phase === PHASE.live && playerActor.hasBomb && !state.bomb) {
     const site = world.sites.find((s) => Math.hypot(p.x - s.x, p.z - s.z) < s.radius);
     if (site) {
@@ -751,7 +689,6 @@ function objectiveTick(dt) {
   }
   plantProgress = 0;
 
-  // Defender near a planted charge: hold E to defuse.
   if (state.bomb && state.bomb.state === 'planted' && playerActor.team === 'warden') {
     const d = Math.hypot(p.x - state.bomb.x, p.z - state.bomb.z);
     if (d < 1.9) {
@@ -774,7 +711,6 @@ function objectiveTick(dt) {
   hud.setPrompt('');
 }
 
-// The simulation tick
 function step(dt) {
   elapsed += dt;
   const state = match.state;
@@ -785,13 +721,8 @@ function step(dt) {
 
   updateAim(dt);
 
-  // Player movement, but only while the body is alive and not in the buy menu.
   if (playerActor.alive && !buyOpen) {
     const look = input.takeLook();
-    // One pixel of mouse is one fixed turn, applied the tick it arrives. The old damped follow
-    // carried a share of every delta into later frames, so a stutter banked rotation.
-    // it at once: that is the "sensitivity suddenly spikes" report. A hard per-tick ceiling still
-    // guards against a pointer-lock glitch reporting a 3000 px jump.
     body.look(
       Math.max(-LOOK_CEILING, Math.min(LOOK_CEILING, look.x)),
       Math.max(-LOOK_CEILING, Math.min(LOOK_CEILING, look.y)),
@@ -803,12 +734,10 @@ function step(dt) {
   weapon.step(dt);
 
   if (input.state.firing && !buyOpen && playerActor.alive && weapon.ready()) playerShoot();
-  // A dry magazine reloads itself, the way every shooter since 1999 has taught us to expect.
   if (playerActor.alive && weapon.state.mag === 0 && weapon.state.reloading <= 0 && weapon.state.reserve > 0) {
     if (weapon.beginReload()) audio.reload(weapon.state.def.sound);
   }
 
-  // Everyone else.
   const ctxBase = {
     actors,
     world,
@@ -850,8 +779,6 @@ function step(dt) {
     const attacking = bot.team === 'dock';
     const site = state.pendingSite ?? world.sites[0];
     const index = bots.indexOf(bot);
-    // Each bot takes its own post around the site instead of standing in the same square metre,
-    // and every one of them watches the approach from the attackers' side of the yard.
     const ring = [
       [0, 0], [3.1, 1.6], [-3.1, 1.6], [2.2, -1.9], [-2.2, -1.9],
     ][index % 5];
@@ -860,7 +787,6 @@ function step(dt) {
       [0, 9], [5.5, 10.5], [-5.5, 10.5], [3.5, -6.5], [-3.5, -6.5],
     ][index % 5];
     const defendSpots = [navPost(site.x + defendRing[0], site.z + defendRing[1])];
-    // CS bots stop camping when the round is running out or the enemy is nearly gone: they hunt.
     const foes = [
       ...bots.filter((b) => b.alive && b.team !== bot.team),
       ...(playerActor.alive && playerActor.team !== bot.team ? [playerActor] : []),
@@ -871,8 +797,6 @@ function step(dt) {
     let watchPoint = navPost(post.x + ring[0] * 0.4, post.z - 14);
     const planted = state.bomb && state.bomb.state === 'planted';
     if (planted) {
-      // The charge is what the round is about now: attackers close a ring around it and watch the
-      // way the defenders have to come, defenders go to the charge itself to take it back.
       const guardRing = [[3.2, 2.4], [-3.2, 2.4], [0, -3.6], [4.2, -1.8], [-4.2, -1.8]][index % 5];
       const guard = navPost(state.bomb.x + guardRing[0], state.bomb.z + guardRing[1]);
       objective = attacking ? guard : { x: state.bomb.x, z: state.bomb.z };
@@ -903,7 +827,6 @@ function step(dt) {
 
   objectiveTick(dt);
 
-  // Tab: the scoreboard, held open for as long as the key is down.
   const wantBoard = input.state.keys.has('Tab') && !buyOpen;
   if (wantBoard !== boardShown) {
     boardShown = wantBoard;
@@ -923,7 +846,6 @@ function step(dt) {
 
   match.step(dt, { actors });
 
-  // The phase changed: tell the player once.
   if (state.phase !== lastPhase) {
     if (state.phase === PHASE.freeze && state.round > 1) {
       hud.banner(`Round ${state.round} — buy ${Math.round(state.phaseTime)}s (B)`, 'phase', 2.4);
@@ -940,7 +862,6 @@ function step(dt) {
     lastPhase = state.phase;
   }
 
-  // HUD readouts.
   hud.setVitals(body.state.health, playerActor.armour);
   hud.setAmmo(weapon.state.mag, weapon.state.reserve, weapon.state.def.name, weapon.state.reloading > 0);
   hud.setMoney(match.state.playerMoney);
@@ -960,13 +881,11 @@ function step(dt) {
     hud.setObjective('');
   }
 
-  // Events the match emitted become the killfeed.
   while (state.events.length) {
     const event = state.events.shift();
     if (event.kind === 'kill') hud.feed(event.text, event);
   }
 
-  // The gun sways, kicks and dips on its own clock.
   viewmodel.update(dt, body.state.speed, body.state.crouch, weapon.state.reloading, playerActor.alive, aimBlend > 0.5);
   const bomb = state.bomb;
   if (bomb && bomb.state === 'planted') {
@@ -981,10 +900,8 @@ function step(dt) {
   }
   muzzleFlash.intensity *= Math.max(0, 1 - dt * 22);
 
-  // A dead player waits for the next round; beginRound() on the phase change puts them back.
 }
 
-// Frame
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min((now - lastTime) / 1000, 0.1);
@@ -1024,7 +941,6 @@ hud.onOverlayClick(() => {
   input.requestLock();
 });
 
-/** Everyone in the round, for the scoreboard: your own row first, then both teams. */
 function scoreRows() {
   const rows = [
     { name: 'You', team: playerActor.team, kills: playerActor.kills, deaths: playerActor.deaths, alive: playerActor.alive, me: true },
@@ -1033,11 +949,8 @@ function scoreRows() {
   return rows.sort((a, b) => b.kills - a.kills);
 }
 
-// Buy menu keys and the scoreboard.
 input.onKey((code) => {
   audio.unlock();
-  // Ctrl is a trap: Ctrl+W closes the tab and no page may block it, so crouch lives on C and
-  // reaching for Ctrl says so instead of letting the browser take the round away.
   if (code === 'ControlLeft' || code === 'ControlRight') {
     hud.banner('Crouch is C — Ctrl+W closes the tab', 'warn', 2.2);
     return;
@@ -1072,17 +985,17 @@ input.onKey((code) => {
   }
 });
 
-// Buy menu clicks.
-hud.el.buyGrid.addEventListener('click', (event) => {
-  const button = event.target.closest('.buy-item');
-  if (!button) return;
-  tryBuy(button.dataset.weapon);
+const buyGridEl = document.getElementById('buy-grid');
+const BUY_BY_KEY = { 1: 'tally', 2: 'skiff', 3: 'harbor', 4: 'longline', 5: 'bastion', 6: 'frag' };
+buyGridEl?.addEventListener('click', (event) => {
+  const row = event.target.closest('.buy-item');
+  if (!row) return;
+  const id = BUY_BY_KEY[row.dataset.key];
+  if (id) tryBuy(id);
 });
 
-// A click anywhere on the yard takes the mouse back after a pause or a menu.
 renderer.domElement.addEventListener('click', () => {
   if (buyOpen) return;
-  // While you are down, a click is how you change who you are watching.
   if (!playerActor.alive) {
     cycleSpectate(1);
     return;
@@ -1096,7 +1009,6 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Go
 beginRound();
 syncCamera();
 hud.setMoney(match.state.playerMoney);
